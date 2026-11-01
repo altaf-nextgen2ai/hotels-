@@ -1,11 +1,21 @@
 import React, { useState } from 'react';
-import { X, Star, MapPin, Check, Shield, Coffee, Users, Bed, Wifi, Clock, AlertCircle } from 'lucide-react';
+import { X, Star, MapPin, Check, Shield, Coffee, Users, Bed, Wifi, Clock, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export default function HotelDetailsModal({ hotel, onClose, onBookRoom }) {
   if (!hotel) return null;
 
-  const [activeTab, setActiveTab] = useState('rooms'); // 'rooms', 'overview', 'reviews', 'rules'
-  const [selectedPhoto, setSelectedPhoto] = useState(hotel.main_image);
+  // Build full gallery — main image first, then gallery images, deduplicated
+  const allPhotos = [hotel.main_image, ...(hotel.gallery_images || [])]
+    .filter(Boolean)
+    .filter((img, idx, arr) => arr.indexOf(img) === idx);
+
+  const [currentIdx,  setCurrentIdx]  = useState(0);
+  const [activeTab,   setActiveTab]   = useState('rooms');
+
+  const selectedPhoto = allPhotos[currentIdx] || hotel.main_image;
+
+  const goPrev = () => setCurrentIdx(i => (i - 1 + allPhotos.length) % allPhotos.length);
+  const goNext = () => setCurrentIdx(i => (i + 1) % allPhotos.length);
 
   const rooms = hotel.rooms || [
     {
@@ -58,58 +68,91 @@ export default function HotelDetailsModal({ hotel, onClose, onBookRoom }) {
           </button>
         </div>
 
-        {/* Photo Gallery Grid */}
-        <div className="p-6 bg-slate-50 border-b border-slate-200">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <div className="md:col-span-3 h-72 md:h-96 rounded-2xl overflow-hidden shadow-inner relative">
-              <img 
-                src={selectedPhoto} 
-                alt="Hotel view" 
-                className="w-full h-full object-cover transition-all duration-300"
+        {/* ── Photo Gallery Carousel ── */}
+        <div className="relative bg-slate-900 border-b border-slate-200">
+          {/* Main image */}
+          <div className="relative h-64 md:h-96 overflow-hidden">
+            {allPhotos.map((img, idx) => (
+              <img
+                key={idx}
+                src={img}
+                alt={`${hotel.name} photo ${idx + 1}`}
+                className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-400 ${idx === currentIdx ? 'opacity-100' : 'opacity-0'}`}
               />
-            </div>
-            <div className="flex md:flex-col gap-2 overflow-x-auto md:overflow-y-auto max-h-96">
-              {[hotel.main_image, ...(hotel.gallery_images || [])].slice(0, 4).map((img, idx) => (
-                <img 
-                  key={idx}
-                  src={img}
-                  alt={`Gallery thumbnail ${idx}`}
-                  onClick={() => setSelectedPhoto(img)}
-                  className={`h-20 w-24 md:w-full rounded-xl object-cover cursor-pointer border-2 transition ${
-                    selectedPhoto === img ? 'border-[#D4AF37] ring-2 ring-[#D4AF37]/30 scale-95' : 'border-transparent opacity-75 hover:opacity-100'
-                  }`}
-                />
-              ))}
+            ))}
+
+            {/* Prev / Next arrows — only if more than 1 photo */}
+            {allPhotos.length > 1 && (
+              <>
+                <button
+                  onClick={goPrev}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center transition z-10"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={goNext}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center transition z-10"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </>
+            )}
+
+            {/* Counter badge */}
+            <div className="absolute bottom-3 right-3 bg-black/60 text-white text-[11px] font-bold px-2.5 py-1 rounded-full z-10">
+              {currentIdx + 1} / {allPhotos.length}
             </div>
           </div>
+
+          {/* Thumbnail strip */}
+          {allPhotos.length > 1 && (
+            <div className="flex gap-2 p-3 overflow-x-auto bg-slate-800">
+              {allPhotos.map((img, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setCurrentIdx(idx)}
+                  className={`shrink-0 w-16 h-12 rounded-lg overflow-hidden border-2 transition ${
+                    idx === currentIdx
+                      ? 'border-[#D4AF37] opacity-100'
+                      : 'border-transparent opacity-50 hover:opacity-80'
+                  }`}
+                >
+                  <img src={img} alt="" className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Navigation Tabs */}
-        <div className="px-6 border-b border-slate-200 flex gap-6 text-sm font-bold text-slate-600 bg-white">
-          <button 
-            onClick={() => setActiveTab('rooms')}
-            className={`py-3 border-b-2 transition ${activeTab === 'rooms' ? 'border-[#D4AF37] text-slate-950' : 'border-transparent hover:text-slate-900'}`}
-          >
-            Available Rooms ({rooms.length})
-          </button>
-          <button 
-            onClick={() => setActiveTab('overview')}
-            className={`py-3 border-b-2 transition ${activeTab === 'overview' ? 'border-[#D4AF37] text-slate-950' : 'border-transparent hover:text-slate-900'}`}
-          >
-            Overview & Amenities
-          </button>
-          <button 
-            onClick={() => setActiveTab('reviews')}
-            className={`py-3 border-b-2 transition ${activeTab === 'reviews' ? 'border-[#D4AF37] text-slate-950' : 'border-transparent hover:text-slate-900'}`}
-          >
-            Guest Reviews ({hotel.review_count})
-          </button>
-          <button 
-            onClick={() => setActiveTab('rules')}
-            className={`py-3 border-b-2 transition ${activeTab === 'rules' ? 'border-[#D4AF37] text-slate-950' : 'border-transparent hover:text-slate-900'}`}
-          >
-            House Rules
-          </button>
+        <div className="border-b border-slate-200 bg-white">
+          <div className="flex flex-wrap gap-2 px-4 sm:px-6 py-2 text-sm font-bold text-slate-600">
+            <button 
+              onClick={() => setActiveTab('rooms')}
+              className={`py-2.5 px-2 sm:px-3 rounded-xl border-b-2 transition ${activeTab === 'rooms' ? 'border-[#D4AF37] text-slate-950 bg-amber-50/60' : 'border-transparent hover:text-slate-900 hover:bg-slate-50'}`}
+            >
+              Available Rooms ({rooms.length})
+            </button>
+            <button 
+              onClick={() => setActiveTab('overview')}
+              className={`py-2.5 px-2 sm:px-3 rounded-xl border-b-2 transition ${activeTab === 'overview' ? 'border-[#D4AF37] text-slate-950 bg-amber-50/60' : 'border-transparent hover:text-slate-900 hover:bg-slate-50'}`}
+            >
+              Overview & Amenities
+            </button>
+            <button 
+              onClick={() => setActiveTab('reviews')}
+              className={`py-2.5 px-2 sm:px-3 rounded-xl border-b-2 transition ${activeTab === 'reviews' ? 'border-[#D4AF37] text-slate-950 bg-amber-50/60' : 'border-transparent hover:text-slate-900 hover:bg-slate-50'}`}
+            >
+              Guest Reviews ({hotel.review_count})
+            </button>
+            <button 
+              onClick={() => setActiveTab('rules')}
+              className={`py-2.5 px-2 sm:px-3 rounded-xl border-b-2 transition ${activeTab === 'rules' ? 'border-[#D4AF37] text-slate-950 bg-amber-50/60' : 'border-transparent hover:text-slate-900 hover:bg-slate-50'}`}
+            >
+              House Rules
+            </button>
+          </div>
         </div>
 
         {/* Modal Tab Content */}
