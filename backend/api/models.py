@@ -15,6 +15,8 @@ class Hotel(models.Model):
     amenities = models.JSONField(default=list) # e.g. ["WiFi", "Pool", "Spa", "Breakfast", "AC"]
     description = models.TextField()
     is_featured = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    commission_percent = models.FloatField(default=10.0)  # Platform commission % per hotel (editable)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -115,7 +117,16 @@ class Booking(models.Model):
     commission_amount = models.IntegerField(default=0) # Rupee amount retained by TRUMITRIP
     net_partner_payout = models.IntegerField(default=0) # Rupee amount payable to hotel partner
     payout_status = models.CharField(max_length=30, choices=PAYOUT_STATUS_CHOICES, default='PENDING')
+    razorpay_order_id = models.CharField(max_length=100, blank=True, default='')  # Razorpay order ID
+    razorpay_payment_id = models.CharField(max_length=100, blank=True, default='')  # Razorpay payment ID
+    razorpay_signature = models.CharField(max_length=256, blank=True, default='')  # Razorpay signature
     special_requests = models.TextField(blank=True, default='')
+    # Email confirmation tracking
+    email_sent = models.BooleanField(default=False)
+    email_sent_at = models.DateTimeField(null=True, blank=True)
+    email_attempts = models.IntegerField(default=0)
+    # Price snapshot — nights fixed at booking time so later room price changes don't alter voucher
+    nights = models.IntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -125,6 +136,7 @@ class Coupon(models.Model):
     code = models.CharField(max_length=50, unique=True)
     discount_percent = models.IntegerField()
     max_discount = models.IntegerField(default=2000)
+    min_order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
 
     def __str__(self):

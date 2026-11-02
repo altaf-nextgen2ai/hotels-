@@ -16,10 +16,10 @@ def seed_database():
     Coupon.objects.all().delete()
 
     print("Creating coupons...")
-    Coupon.objects.create(code='TRUMI10', discount_percent=10, max_discount=1500)
-    Coupon.objects.create(code='LUXURY25', discount_percent=25, max_discount=4000)
-    Coupon.objects.create(code='WELCOME20', discount_percent=20, max_discount=2500)
-    Coupon.objects.create(code='SUMMER50', discount_percent=15, max_discount=3000)
+    Coupon.objects.create(code='TRUMI10', discount_percent=10, max_discount=1500, min_order=2000)
+    Coupon.objects.create(code='LUXURY25', discount_percent=25, max_discount=4000, min_order=5000)
+    Coupon.objects.create(code='WELCOME20', discount_percent=20, max_discount=2500, min_order=3000)
+    Coupon.objects.create(code='SUMMER50', discount_percent=15, max_discount=3000, min_order=4000)
 
     hotels_data = [
         {

@@ -1,255 +1,190 @@
-import React, { useState } from 'react';
-import { X, Mail, Lock, User, Phone } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { X, ShieldCheck, Star, MapPin } from 'lucide-react';
 import { apiService } from '../services/api';
 
+// ─── Your Google OAuth Client ID ──────────────────────────────────────────────
+const GOOGLE_CLIENT_ID = '173907682716-hshq5rj7cjcft2ffgg2q9o0c507b1ae2.apps.googleusercontent.com';
+
 export default function AuthModal({ onClose, onLoginSuccess }) {
-  const [mode, setMode] = useState('login'); // 'login', 'signup'
-  
-  // Login Form
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-
-  // Signup Form
-  const [signupName, setSignupName] = useState('');
-  const [signupEmail, setSignupEmail] = useState('');
-  const [signupPhone, setSignupPhone] = useState('');
-  const [signupPassword, setSignupPassword] = useState('');
-  const [verificationCode, setVerificationCode] = useState('');
-  const [awaitingVerification, setAwaitingVerification] = useState(false);
-
-  const [loading, setLoading] = useState(false);
+  const googleBtnRef = useRef(null);
+  const [loading, setLoading]   = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [sdkReady, setSdkReady] = useState(false);
 
-  const handleLoginSubmit = async (e) => {
-    e.preventDefault();
-    if (!loginEmail || !loginPassword) return;
-
-    setLoading(true);
-    setErrorMsg('');
-    const res = await apiService.login(loginEmail, loginPassword);
-    setLoading(false);
-
-    if (res.user) {
-      onLoginSuccess(res.user);
-    } else {
-      setErrorMsg(res.error || 'Login failed. Please check credentials.');
+  // ── Load Google Identity Services SDK ──────────────────────────────────────
+  useEffect(() => {
+    if (window.google?.accounts?.id) {
+      initGoogle();
+      return;
     }
+
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = initGoogle;
+    script.onerror = () => setErrorMsg('Failed to load Google Sign-In. Check your internet connection.');
+    document.head.appendChild(script);
+
+    return () => {
+      // cleanup: cancel any pending one-tap prompt
+      window.google?.accounts?.id?.cancel();
+    };
+  }, []);
+
+  const initGoogle = () => {
+    if (!window.google?.accounts?.id) return;
+
+    window.google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: handleGoogleCredential,
+      auto_select: false,
+      cancel_on_tap_outside: false,
+    });
+
+    // Render the styled Google button into our container
+    window.google.accounts.id.renderButton(googleBtnRef.current, {
+      theme: 'outline',
+      size: 'large',
+      width: googleBtnRef.current?.offsetWidth || 360,
+      text: 'continue_with',
+      shape: 'rectangular',
+      logo_alignment: 'left',
+    });
+
+    setSdkReady(true);
   };
 
-  const handleSignupSubmit = async (e) => {
-    e.preventDefault();
-    if (!signupName || !signupEmail || !signupPassword) return;
-
+  // ── Called by Google after user picks an account ───────────────────────────
+  const handleGoogleCredential = async (googleResponse) => {
     setLoading(true);
     setErrorMsg('');
-    const res = await apiService.signup(signupName, signupEmail, signupPhone, signupPassword);
+
+    const result = await apiService.googleLogin(googleResponse.credential);
     setLoading(false);
 
-    if (!res.error) {
-      setAwaitingVerification(true);
-      setVerificationCode('');
-      setErrorMsg(res.message || 'Verification code sent to your email.');
-    } else {
-      setErrorMsg(res.error || 'Signup failed. Email might already exist.');
+    if (result?.error) {
+      setErrorMsg(result.error);
+      return;
     }
-  };
 
-  const handleVerificationSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setErrorMsg('');
-    const res = await apiService.verifySignup(signupEmail, verificationCode);
-    setLoading(false);
-    if (!res.error) {
-      setMode('login');
-      setAwaitingVerification(false);
-      setErrorMsg('Email verified. Please login to continue.');
+    if (result?.user) {
+      onLoginSuccess(result.user);
     } else {
-      setErrorMsg(res.error);
+      setErrorMsg('Something went wrong. Please try again.');
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 my-6">
-        
-        {/* Modal Header */}
-        <div className="bg-[#0A192F] text-white px-6 py-5 flex justify-between items-center relative">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-6">
+      <div className="bg-white rounded-none sm:rounded-3xl max-w-full sm:max-w-md w-full shadow-2xl border-0 sm:border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 overflow-y-auto max-h-screen sm:max-h-[calc(100vh-3rem)]">
+
+        {/* Header */}
+        <div className="bg-[#0A192F] px-6 py-5 flex justify-between items-start relative">
           <div>
-            <h2 className="text-xl font-black text-[#D4AF37]">
-              {mode === 'login' ? 'Account Login' : 'Create Customer Account'}
+            <p className="text-[11px] font-bold text-[#D4AF37] uppercase tracking-widest mb-1">TRUMITRIP</p>
+            <h2 className="text-2xl font-black text-white leading-tight">
+              Welcome Back
             </h2>
-            <p className="text-xs text-slate-300">TRUMITRIP Luxury Hotel Booking Portal</p>
+            <p className="text-slate-400 text-xs font-medium mt-1">
+              Sign in to manage bookings, view history &amp; get exclusive deals
+            </p>
           </div>
-          <button 
-            onClick={onClose} 
-            className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center font-bold text-slate-300"
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-300 transition"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Modal Body */}
-        <div className="p-6">
-          
+        {/* Trust badges */}
+        <div className="flex items-center gap-4 px-6 py-3 bg-slate-50 border-b border-slate-100">
+          {[
+            { icon: ShieldCheck, text: 'Secure Login' },
+            { icon: Star,        text: '50,000+ Bookings' },
+            { icon: MapPin,      text: '200+ Hotels' },
+          ].map(({ icon: Icon, text }) => (
+            <div key={text} className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+              <Icon className="w-3.5 h-3.5 text-[#D4AF37]" />
+              {text}
+            </div>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div className="px-4 sm:px-6 py-6 sm:py-8 space-y-5">
+
+          {/* Error */}
           {errorMsg && (
-            <div className="mb-4 bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold p-3 rounded-xl">
+            <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold p-3 rounded-xl">
               {errorMsg}
             </div>
           )}
 
-          {/* LOGIN FORM */}
-          {mode === 'login' && (
-            <form onSubmit={handleLoginSubmit} className="space-y-4">
-              <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
-                <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl focus-within:border-[#D4AF37]">
-                  <Mail className="w-4 h-4 text-slate-400" />
-                  <input 
-                    type="text"
-                    required
-                    value={loginEmail}
-                    onChange={(e) => setLoginEmail(e.target.value)}
-                    placeholder="name@domain.com"
-                    className="w-full bg-transparent text-xs font-bold text-slate-800 focus:outline-none"
-                  />
-                </div>
+          {/* Google Sign-In Button */}
+          <div className="space-y-3">
+            <p className="text-center text-xs font-bold text-slate-500 uppercase tracking-wider">
+              One-click sign in
+            </p>
+
+            {/* Google renders its button into this div */}
+            <div
+              ref={googleBtnRef}
+              className="w-full min-h-[44px] flex items-center justify-center"
+            />
+
+            {/* Loading / SDK not ready fallback */}
+            {!sdkReady && !errorMsg && (
+              <div className="flex items-center justify-center gap-2 text-xs text-slate-400 font-medium py-2">
+                <div className="w-4 h-4 border-2 border-slate-300 border-t-[#D4AF37] rounded-full animate-spin" />
+                Loading Google Sign-In...
               </div>
+            )}
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
-                <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl focus-within:border-[#D4AF37]">
-                  <Lock className="w-4 h-4 text-slate-400" />
-                  <input 
-                    type="password"
-                    required
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    placeholder="Enter password"
-                    className="w-full bg-transparent text-xs font-bold text-slate-800 focus:outline-none"
-                  />
-                </div>
+            {loading && (
+              <div className="flex items-center justify-center gap-2 text-xs font-semibold text-slate-600 py-2">
+                <div className="w-4 h-4 border-2 border-slate-300 border-t-[#0A192F] rounded-full animate-spin" />
+                Signing you in...
               </div>
+            )}
+          </div>
 
-              <button 
-                type="submit"
-                disabled={loading}
-                className="w-full bg-gradient-to-r from-[#D4AF37] via-[#E5C158] to-[#B8860B] text-slate-950 font-black text-sm py-3.5 rounded-xl hover:brightness-110 shadow-lg transition flex items-center justify-center gap-2"
-              >
-                {loading ? 'Logging in...' : 'Sign In To Account'}
-              </button>
+          {/* Divider */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-slate-200" />
+            <span className="text-[11px] text-slate-400 font-medium">No password required</span>
+            <div className="flex-1 h-px bg-slate-200" />
+          </div>
 
-              {/* Toggle to Signup */}
-              <div className="text-center pt-2">
-                <p className="text-xs text-slate-500 font-medium">
-                  Don't have an account?{' '}
-                  <button 
-                    type="button" 
-                    onClick={() => { setMode('signup'); setErrorMsg(''); }}
-                    className="font-bold text-amber-600 hover:underline"
-                  >
-                    Sign Up Now
-                  </button>
-                </p>
-              </div>
+          {/* What you get */}
+          <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 space-y-2">
+            <p className="text-xs font-extrabold text-slate-800">What you get after signing in:</p>
+            <ul className="space-y-1.5">
+              {[
+                'Instant booking confirmation & e-vouchers',
+                'Real-time booking history & status',
+                'Exclusive member-only hotel rates',
+                'One-click cancellation & refunds',
+              ].map((item) => (
+                <li key={item} className="flex items-start gap-2 text-[11px] text-slate-600 font-medium">
+                  <span className="text-[#D4AF37] font-black mt-0.5">✓</span>
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
 
-            </form>
-          )}
-
-          {/* SIGNUP FORM */}
-          {mode === 'signup' && awaitingVerification ? (
-            <form onSubmit={handleVerificationSubmit} className="space-y-4">
-              <p className="text-sm text-slate-600">Enter the 6-digit code sent to <strong>{signupEmail}</strong>.</p>
-              <input type="text" inputMode="numeric" maxLength="6" required value={verificationCode} onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))} placeholder="6-digit OTP" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold" />
-              <button type="submit" disabled={loading} className="w-full bg-slate-900 text-[#D4AF37] font-black text-sm py-3.5 rounded-xl">{loading ? 'Verifying...' : 'Verify Email'}</button>
-            </form>
-          ) : mode === 'signup' && (
-            <form onSubmit={handleSignupSubmit} className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Full Name *</label>
-                <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                  <User className="w-4 h-4 text-slate-400" />
-                  <input 
-                    type="text"
-                    required
-                    value={signupName}
-                    onChange={(e) => setSignupName(e.target.value)}
-                    placeholder="e.g. Altaf Fateh"
-                    className="w-full bg-transparent text-xs font-bold text-slate-800 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Email Address *</label>
-                <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                  <Mail className="w-4 h-4 text-slate-400" />
-                  <input 
-                    type="email"
-                    required
-                    value={signupEmail}
-                    onChange={(e) => setSignupEmail(e.target.value)}
-                    placeholder="name@domain.com"
-                    className="w-full bg-transparent text-xs font-bold text-slate-800 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Mobile Phone Number</label>
-                <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                  <Phone className="w-4 h-4 text-slate-400" />
-                  <input 
-                    type="tel"
-                    value={signupPhone}
-                    onChange={(e) => setSignupPhone(e.target.value)}
-                    placeholder="+91 9876543210"
-                    className="w-full bg-transparent text-xs font-bold text-slate-800 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Create Password *</label>
-                <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                  <Lock className="w-4 h-4 text-slate-400" />
-                  <input 
-                    type="password"
-                    required
-                    value={signupPassword}
-                    onChange={(e) => setSignupPassword(e.target.value)}
-                    placeholder="Create a strong password"
-                    className="w-full bg-transparent text-xs font-bold text-slate-800 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <button 
-                type="submit"
-                disabled={loading}
-                className="w-full bg-gradient-to-r from-[#0F172A] to-[#1E293B] text-[#D4AF37] font-black text-sm py-3.5 rounded-xl hover:bg-slate-800 shadow-lg transition flex items-center justify-center gap-2"
-              >
-                {loading ? 'Creating Account...' : 'Complete Registration'}
-              </button>
-
-              <div className="text-center pt-2">
-                <p className="text-xs text-slate-500 font-medium">
-                  Already have an account?{' '}
-                  <button 
-                    type="button" 
-                    onClick={() => { setMode('login'); setErrorMsg(''); }}
-                    className="font-bold text-amber-600 hover:underline"
-                  >
-                    Login Instead
-                  </button>
-                </p>
-              </div>
-
-            </form>
-          )}
+          {/* Privacy note */}
+          <p className="text-center text-[10px] text-slate-400 leading-relaxed">
+            By continuing, you agree to Trumitrip's{' '}
+            <span className="text-amber-600 font-bold cursor-pointer hover:underline">Terms of Service</span>
+            {' '}and{' '}
+            <span className="text-amber-600 font-bold cursor-pointer hover:underline">Privacy Policy</span>.
+            <br />We only access your name and email — nothing else.
+          </p>
 
         </div>
-
       </div>
     </div>
   );

@@ -1,5 +1,24 @@
 const API_BASE_URL = 'http://127.0.0.1:8000/api';
 
+const adminRequest = async (path, { method = 'GET', body } = {}) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('trumitrip_token') || ''}`,
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {})
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {})
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return { error: data.error || `Request failed (${response.status})` };
+    return data;
+  } catch (error) {
+    console.warn(`Admin API Error (${path}):`, error);
+    return { error: 'Backend unavailable. Please start the Django server and try again.' };
+  }
+};
+
 export const apiService = {
   // Authentication APIs
   async login(email, password) {
@@ -181,14 +200,92 @@ export const apiService = {
 
   // Admin analytics
   async getAdminAnalytics() {
-    try {
-      const response = await fetch(`${API_BASE_URL}/admin/analytics/`);
-      if (!response.ok) throw new Error('Failed to fetch analytics');
-      return await response.json();
-    } catch (error) {
-      console.warn('API Error (getAdminAnalytics):', error);
-      return null;
-    }
+    return adminRequest('/admin/analytics/');
+  },
+
+  async getAdminVendors() {
+    return adminRequest('/admin/vendors/');
+  },
+
+  async getAdminHotels() {
+    return adminRequest('/admin/hotels/');
+  },
+
+  async getAdminBookings() {
+    return adminRequest('/admin/bookings/');
+  },
+
+  async updateAdminBookingStatus(bookingId, status) {
+    return adminRequest(`/admin/bookings/${encodeURIComponent(bookingId)}/`, {
+      method: 'PATCH',
+      body: { status }
+    });
+  },
+
+  async createAdminVendor(vendorData) {
+    return adminRequest('/admin/vendors/', { method: 'POST', body: vendorData });
+  },
+
+  async updateAdminVendor(vendorId, vendorData) {
+    return adminRequest(`/admin/vendors/${vendorId}/`, { method: 'PATCH', body: vendorData });
+  },
+
+  async removeAdminVendor(vendorId) {
+    return adminRequest(`/admin/vendors/${vendorId}/`, { method: 'DELETE' });
+  },
+
+  async createAdminHotel(hotelData) {
+    return adminRequest('/admin/hotels/', { method: 'POST', body: hotelData });
+  },
+
+  async updateAdminHotel(hotelId, hotelData) {
+    return adminRequest(`/admin/hotels/${hotelId}/`, { method: 'PUT', body: hotelData });
+  },
+
+  async archiveAdminHotel(hotelId) {
+    return adminRequest(`/admin/hotels/${hotelId}/`, { method: 'DELETE' });
+  },
+
+  async getAdminPayoutsSecure() {
+    return adminRequest('/admin/payouts/');
+  },
+
+  async updateAdminPayoutSecure(bookingId, payoutStatus) {
+    return adminRequest('/admin/payouts/', {
+      method: 'POST',
+      body: { booking_id: bookingId, payout_status: payoutStatus }
+    });
+  },
+
+  async getAdminCouponsSecure() {
+    return adminRequest('/admin/coupons/');
+  },
+
+  async getAdminCommissionsSecure() {
+    return adminRequest('/admin/commission/');
+  },
+
+  async updateAdminCommissionSecure(hotelId, commissionPercent) {
+    return adminRequest('/admin/commission/', {
+      method: 'POST',
+      body: { hotel_id: hotelId, commission_percent: commissionPercent }
+    });
+  },
+
+  async createAdminCouponSecure(couponData) {
+    return adminRequest('/admin/coupons/', { method: 'POST', body: couponData });
+  },
+
+  async updateAdminCouponSecure(couponId, couponData) {
+    return adminRequest(`/admin/coupons/${couponId}/`, { method: 'PUT', body: couponData });
+  },
+
+  async removeAdminCoupon(couponId) {
+    return adminRequest(`/admin/coupons/${couponId}/`, { method: 'DELETE' });
+  },
+
+  async updateAdminVendorStatus(vendorId, status) {
+    return adminRequest(`/admin/vendors/${vendorId}/status/`, { method: 'POST', body: { status } });
   },
 
   // Partner rate update
@@ -211,7 +308,10 @@ export const apiService = {
     try {
       const response = await fetch(`${API_BASE_URL}/admin/hotels/`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('trumitrip_token') || ''}`
+        },
         body: JSON.stringify(hotelData)
       });
       return await response.json();
@@ -334,6 +434,122 @@ export const apiService = {
       console.warn('API Error (updateAdminPayoutStatus):', error);
       return null;
     }
+  },
+
+  // ── Razorpay Payment Gateway ──────────────────────────────────────────────
+
+  // Step 1: Create a Razorpay order on the backend
+  async createRazorpayOrder(totalPrice) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/payments/create-order/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('trumitrip_token') || ''}`
+        },
+        body: JSON.stringify({ total_price: totalPrice })
+      });
+      const data = await response.json();
+      if (!response.ok) return { error: data.error || 'Failed to create Razorpay order' };
+      return data; // { razorpay_order_id, amount, currency, key_id }
+    } catch (error) {
+      console.warn('API Error (createRazorpayOrder):', error);
+      return { error: 'Backend unavailable. Please start the Django server and try again.' };
+    }
+  },
+
+  // Step 2: Verify Razorpay payment signature and create booking
+  async verifyRazorpayPayment(razorpayOrderId, razorpayPaymentId, razorpaySignature, bookingPayload) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/payments/verify/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('trumitrip_token') || ''}`
+        },
+        body: JSON.stringify({
+          razorpay_order_id: razorpayOrderId,
+          razorpay_payment_id: razorpayPaymentId,
+          razorpay_signature: razorpaySignature,
+          booking_payload: bookingPayload,
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) return { error: data.error || 'Payment verification failed' };
+      return data; // { message, booking }
+    } catch (error) {
+      console.warn('API Error (verifyRazorpayPayment):', error);
+      return { error: 'Backend unavailable. Please start the Django server and try again.' };
+    }
+  },
+
+  // Get / update commission settings per hotel (Admin)
+  async getCommissionSettings() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/commission/`);
+      if (!response.ok) throw new Error('Failed to fetch commission settings');
+      return await response.json();
+    } catch (error) {
+      console.warn('API Error (getCommissionSettings):', error);
+      return [];
+    }
+  },
+
+  async updateCommission(hotelId, commissionPercent) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/commission/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hotel_id: hotelId, commission_percent: commissionPercent })
+      });
+      return await response.json();
+    } catch (error) {
+      console.warn('API Error (updateCommission):', error);
+      return null;
+    }
+  },
+
+  // Google Sign-In — send the Google ID token, get back user + session token
+  async googleLogin(credential) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/google/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential })
+      });
+      const data = await response.json();
+      if (!response.ok) return { error: data.error || 'Google Sign-In failed' };
+      if (data.token) localStorage.setItem('trumitrip_token', data.token);
+      return data; // { token, user: { id, name, email, role, ... } }
+    } catch (error) {
+      return { error: 'Backend unavailable. Please start the Django server and try again.' };
+    }
+  },
+
+  // Download booking voucher PDF — triggers browser file download
+  async downloadVoucher(bookingId) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/bookings/voucher/${bookingId}/`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('trumitrip_token') || ''}` }
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        return { error: err.error || 'Could not download voucher.' };
+      }
+      // Convert response to blob and trigger download
+      const blob = await response.blob();
+      const url  = window.URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `Trumitrip_Voucher_${bookingId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      return { success: true };
+    } catch (error) {
+      console.warn('API Error (downloadVoucher):', error);
+      return { error: 'Backend unavailable. Please start the Django server and try again.' };
+    }
   }
 };
-

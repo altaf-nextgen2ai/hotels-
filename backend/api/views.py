@@ -1,17 +1,42 @@
 import random
 import string
 import secrets
-from datetime import timedelta
+import hmac
+import hashlib
+from datetime import timedelta, date as date_type
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
+from django.core.validators import validate_email
+from django.http import HttpResponse
 from django.utils import timezone
 from django.contrib.auth.hashers import check_password, make_password
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, generics
 from django.db.models import Q, Sum, Count
+from django.db.models.functions import TruncMonth
 from .models import Hotel, Room, Booking, Coupon, Review, UserProfile
 from .serializers import HotelSerializer, RoomSerializer, BookingSerializer, CouponSerializer, ReviewSerializer, UserProfileSerializer
+from .services.email_service import send_booking_confirmation, send_vendor_account_email
+from .services.pdf_service import generate_booking_pdf
+
+import razorpay
+razorpay_client = razorpay.Client(
+    auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+)
+
+def admin_access_error(request):
+    token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+    user = UserProfile.objects.filter(
+        auth_token=token,
+        is_email_verified=True
+    ).first() if token else None
+    if not user:
+        return Response({"error": "Admin login required."}, status=status.HTTP_401_UNAUTHORIZED)
+    if user.role != 'ADMIN':
+        return Response({"error": "Administrator access required."}, status=status.HTTP_403_FORBIDDEN)
+    return None
 
 class SignupView(APIView):
     def post(self, request):
@@ -159,6 +184,7 @@ class CreateVendorView(APIView):
         )
 
         serializer = UserProfileSerializer(vendor)
+        send_vendor_account_email(vendor, 'PENDING')
         return Response({
             "message": "Vendor application submitted successfully. Pending admin approval.",
             "vendor": serializer.data
@@ -166,12 +192,18 @@ class CreateVendorView(APIView):
 
 class ListVendorsView(APIView):
     def get(self, request):
-        vendors = UserProfile.objects.filter(role='VENDOR').order_by('-created_at')
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        vendors = UserProfile.objects.filter(role='VENDOR').select_related('hotel').order_by('-created_at')
         serializer = UserProfileSerializer(vendors, many=True)
         return Response(serializer.data)
 
 class AdminVendorStatusView(APIView):
     def post(self, request, pk):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
         status_value = request.data.get('status', '').upper()
         if status_value not in ['APPROVED', 'REJECTED', 'PENDING']:
             return Response({"error": "Invalid status choice"}, status=status.HTTP_400_BAD_REQUEST)
@@ -179,6 +211,7 @@ class AdminVendorStatusView(APIView):
             vendor = UserProfile.objects.get(pk=pk, role='VENDOR')
             vendor.vendor_status = status_value
             vendor.save(update_fields=['vendor_status'])
+            send_vendor_account_email(vendor, status_value)
             serializer = UserProfileSerializer(vendor)
             return Response({
                 "message": f"Vendor '{vendor.name}' has been {status_value.lower()}.",
@@ -187,9 +220,183 @@ class AdminVendorStatusView(APIView):
         except UserProfile.DoesNotExist:
             return Response({"error": "Vendor record not found."}, status=status.HTTP_404_NOT_FOUND)
 
+class AdminVendorManageView(APIView):
+    def get(self, request):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        vendors = UserProfile.objects.filter(role='VENDOR').select_related('hotel').order_by('-created_at')
+        return Response(UserProfileSerializer(vendors, many=True).data)
+
+    def post(self, request):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        name = request.data.get('name', '').strip()
+        email = request.data.get('email', '').strip().lower()
+        phone = request.data.get('phone', '').strip()
+        password = request.data.get('password', '')
+        hotel_id = request.data.get('hotel') or request.data.get('hotel_id')
+        vendor_status = request.data.get('vendor_status', 'APPROVED').upper()
+
+        if not name or not email or not password:
+            return Response({"error": "Name, email, and a temporary password are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if UserProfile.objects.filter(email=email).exists():
+            return Response({"error": "An account with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
+        if vendor_status not in ['PENDING', 'APPROVED', 'REJECTED']:
+            return Response({"error": "Invalid vendor status."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            validate_email(email)
+        except ValidationError:
+            return Response({"error": "Enter a valid email address."}, status=status.HTTP_400_BAD_REQUEST)
+
+        hotel = None
+        if hotel_id not in (None, ''):
+            try:
+                hotel = Hotel.objects.get(pk=hotel_id)
+            except (Hotel.DoesNotExist, ValueError, TypeError):
+                return Response({"error": "Selected hotel was not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        vendor = UserProfile.objects.create(
+            name=name,
+            email=email,
+            phone=phone,
+            password=make_password(password),
+            role='VENDOR',
+            vendor_status=vendor_status,
+            is_email_verified=True,
+            hotel=hotel,
+        )
+        return Response(UserProfileSerializer(vendor).data, status=status.HTTP_201_CREATED)
+
+    def patch(self, request, pk):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        try:
+            vendor = UserProfile.objects.select_related('hotel').get(pk=pk, role='VENDOR')
+        except UserProfile.DoesNotExist:
+            return Response({"error": "Vendor record not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        updates = {}
+        for field in ('name', 'phone'):
+            if field in request.data:
+                value = request.data[field].strip()
+                if field == 'name' and not value:
+                    return Response({"error": "Vendor name cannot be empty."}, status=status.HTTP_400_BAD_REQUEST)
+                updates[field] = value
+        if 'email' in request.data:
+            email = request.data['email'].strip().lower()
+            if UserProfile.objects.filter(email=email).exclude(pk=vendor.pk).exists():
+                return Response({"error": "An account with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                validate_email(email)
+            except ValidationError:
+                return Response({"error": "Enter a valid email address."}, status=status.HTTP_400_BAD_REQUEST)
+            updates['email'] = email
+        if 'vendor_status' in request.data:
+            vendor_status = request.data['vendor_status'].upper()
+            if vendor_status not in ['PENDING', 'APPROVED', 'REJECTED']:
+                return Response({"error": "Invalid vendor status."}, status=status.HTTP_400_BAD_REQUEST)
+            updates['vendor_status'] = vendor_status
+        if 'hotel' in request.data or 'hotel_id' in request.data:
+            hotel_id = request.data.get('hotel', request.data.get('hotel_id'))
+            if hotel_id in (None, ''):
+                updates['hotel'] = None
+            else:
+                try:
+                    updates['hotel'] = Hotel.objects.get(pk=hotel_id)
+                except (Hotel.DoesNotExist, ValueError, TypeError):
+                    return Response({"error": "Selected hotel was not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        for field, value in updates.items():
+            setattr(vendor, field, value)
+        if updates:
+            vendor.save(update_fields=list(updates))
+        return Response(UserProfileSerializer(vendor).data)
+
+    def delete(self, request, pk):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        try:
+            vendor = UserProfile.objects.get(pk=pk, role='VENDOR')
+        except UserProfile.DoesNotExist:
+            return Response({"error": "Vendor record not found."}, status=status.HTTP_404_NOT_FOUND)
+        vendor.delete()
+        return Response({"message": "Vendor account removed. Booking records have been retained."})
+
+class AdminBookingManageView(APIView):
+    def get(self, request):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        bookings = Booking.objects.select_related('hotel', 'room', 'user').order_by('-created_at')
+        return Response(BookingSerializer(bookings, many=True).data)
+
+    def patch(self, request, booking_id):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        status_value = request.data.get('status', '').upper()
+        valid_statuses = {choice[0] for choice in Booking.STATUS_CHOICES}
+        if status_value not in valid_statuses:
+            return Response({"error": "Invalid booking status."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            booking = Booking.objects.select_related('hotel', 'room', 'user').get(booking_id=booking_id)
+        except Booking.DoesNotExist:
+            return Response({"error": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+        booking.status = status_value
+        booking.save(update_fields=['status'])
+        return Response(BookingSerializer(booking).data)
+
+class AdminCouponManageView(APIView):
+    def get(self, request):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        return Response(CouponSerializer(Coupon.objects.all().order_by('code'), many=True).data)
+
+    def post(self, request):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        serializer = CouponSerializer(data=request.data)
+        if serializer.is_valid():
+            coupon = serializer.save(code=serializer.validated_data['code'].strip().upper())
+            return Response(CouponSerializer(coupon).data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def put(self, request, pk):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        try:
+            coupon = Coupon.objects.get(pk=pk)
+        except Coupon.DoesNotExist:
+            return Response({"error": "Coupon not found."}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data.copy()
+        if 'code' in data:
+            data['code'] = data['code'].strip().upper()
+        serializer = CouponSerializer(coupon, data=data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(CouponSerializer(coupon).data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        try:
+            Coupon.objects.get(pk=pk).delete()
+        except Coupon.DoesNotExist:
+            return Response({"error": "Coupon not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"message": "Coupon removed."})
+
 class HotelListView(APIView):
     def get(self, request):
-        queryset = Hotel.objects.all()
+        queryset = Hotel.objects.filter(is_active=True)
 
         city = request.query_params.get('city', None)
         search = request.query_params.get('search', None)
@@ -200,13 +407,19 @@ class HotelListView(APIView):
         sort_by = request.query_params.get('sort_by', None)
 
         if city and city.strip() and city.lower() != 'all':
-            queryset = queryset.filter(Q(city__icontains=city.strip()) | Q(destination__icontains=city.strip()))
+            queryset = queryset.filter(
+                Q(city__icontains=city.strip()) |
+                Q(destination__icontains=city.strip()) |
+                Q(address__icontains=city.strip()) |
+                Q(name__icontains=city.strip())
+            )
 
         if search and search.strip():
             queryset = queryset.filter(
                 Q(name__icontains=search.strip()) | 
                 Q(city__icontains=search.strip()) | 
                 Q(destination__icontains=search.strip()) |
+                Q(address__icontains=search.strip()) |
                 Q(description__icontains=search.strip())
             )
 
@@ -248,7 +461,7 @@ class HotelListView(APIView):
         return Response(serializer.data)
 
 class HotelDetailView(generics.RetrieveAPIView):
-    queryset = Hotel.objects.all()
+    queryset = Hotel.objects.filter(is_active=True)
     serializer_class = HotelSerializer
 
 class BookingListCreateView(APIView):
@@ -279,19 +492,42 @@ class BookingListCreateView(APIView):
             rand_suffix = ''.join(random.choices(string.digits, k=4))
             data['booking_id'] = f"TMT-2026-{rand_suffix}"
 
-        # Financial Snapshot (10% Commission)
+        # Financial Snapshot — use hotel's commission_percent (per-hotel, not hardcoded)
         total = int(data.get('total_price', 0))
-        comm_rate = 10.0
-        comm_amount = int(total * 0.10)
+        try:
+            hotel_obj = Hotel.objects.get(pk=data.get('hotel'))
+            comm_rate = hotel_obj.commission_percent
+        except Hotel.DoesNotExist:
+            comm_rate = 10.0
+        comm_amount = int(total * comm_rate / 100)
         net_payout = total - comm_amount
         data['commission_rate'] = comm_rate
         data['commission_amount'] = comm_amount
         data['net_partner_payout'] = net_payout
         data['status'] = 'CONFIRMED'
 
+        # Snapshot number of nights at booking time so future room price changes
+        # don't alter the stored voucher figures
+        try:
+            from datetime import date as _date
+            ci = data.get('check_in')
+            co = data.get('check_out')
+            if isinstance(ci, str):
+                ci = _date.fromisoformat(ci)
+            if isinstance(co, str):
+                co = _date.fromisoformat(co)
+            data['nights'] = max(1, (co - ci).days)
+        except Exception:
+            data['nights'] = 1
+
         serializer = BookingSerializer(data=data)
         if serializer.is_valid():
             booking = serializer.save()
+            # ── Send confirmation email with PDF voucher (non-blocking) ──────
+            try:
+                send_booking_confirmation(booking)
+            except Exception:
+                pass  # email failure must never break booking creation
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -325,40 +561,40 @@ class BookingCancelView(APIView):
 class ValidateCouponView(APIView):
     def post(self, request):
         code = request.data.get('code', '').strip().upper()
-        total_amount = request.data.get('total_amount', 0)
+        try:
+            total_amount = int(request.data.get('total_amount', 0))
+        except (TypeError, ValueError):
+            return Response({"valid": False, "message": "Invalid booking amount."}, status=status.HTTP_400_BAD_REQUEST)
 
-        valid_coupons = {
-            'TRUMI10': {'percent': 10, 'max_discount': 1500, 'min_order': 2000},
-            'LUXURY25': {'percent': 25, 'max_discount': 4000, 'min_order': 5000},
-            'WELCOME20': {'percent': 20, 'max_discount': 2500, 'min_order': 3000},
-            'SUMMER50': {'percent': 15, 'max_discount': 3000, 'min_order': 4000},
-        }
-
-        if code in valid_coupons:
-            details = valid_coupons[code]
-            if total_amount < details['min_order']:
-                return Response({
-                    "valid": False,
-                    "message": f"Minimum booking amount of ₹{details['min_order']} required for coupon {code}."
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            calc_discount = int((total_amount * details['percent']) / 100)
-            final_discount = min(calc_discount, details['max_discount'])
-            return Response({
-                "valid": True,
-                "code": code,
-                "discount_amount": final_discount,
-                "discount_percent": details['percent'],
-                "message": f"Coupon '{code}' applied! You saved ₹{final_discount}"
-            })
-        else:
+        coupon = Coupon.objects.filter(code=code, is_active=True).first()
+        if not coupon:
             return Response({
                 "valid": False,
-                "message": "Invalid Coupon Code. Try TRUMI10 or LUXURY25"
+                "message": "Invalid or inactive coupon code."
             }, status=status.HTTP_400_BAD_REQUEST)
+        if total_amount < 0:
+            return Response({"valid": False, "message": "Invalid booking amount."}, status=status.HTTP_400_BAD_REQUEST)
+        if total_amount < coupon.min_order:
+            return Response({
+                "valid": False,
+                "message": f"Minimum booking amount of ₹{coupon.min_order} required for coupon {coupon.code}."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        calc_discount = int(total_amount * coupon.discount_percent / 100)
+        final_discount = min(calc_discount, coupon.max_discount)
+        return Response({
+            "valid": True,
+            "code": coupon.code,
+            "discount_amount": final_discount,
+            "discount_percent": coupon.discount_percent,
+            "message": f"Coupon '{coupon.code}' applied! You saved ₹{final_discount}"
+        })
 
 class AdminAnalyticsView(APIView):
     def get(self, request):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
         total_hotels = Hotel.objects.count()
         total_bookings = Booking.objects.count()
         total_vendors = UserProfile.objects.filter(role='VENDOR').count()
@@ -370,16 +606,18 @@ class AdminAnalyticsView(APIView):
         recent_bookings = Booking.objects.all().order_by('-created_at')[:10]
         recent_serializer = BookingSerializer(recent_bookings, many=True)
 
-        monthly_data = [
-            {"month": "Jan", "revenue": 142000, "commission": 14200, "bookings": 48},
-            {"month": "Feb", "revenue": 198000, "commission": 19800, "bookings": 64},
-            {"month": "Mar", "revenue": 245000, "commission": 24500, "bookings": 82},
-            {"month": "Apr", "revenue": 310000, "commission": 31000, "bookings": 95},
-            {"month": "May", "revenue": 420000, "commission": 42000, "bookings": 130},
-            {"month": "Jun", "revenue": 380000, "commission": 38000, "bookings": 115},
-            {"month": "Jul", "revenue": 510000, "commission": 51000, "bookings": 160},
-            {"month": "Aug", "revenue": total_revenue or 640000, "commission": total_commission or 64000, "bookings": total_bookings or 195},
-        ]
+        monthly_data = list(
+            confirmed_bookings.annotate(month=TruncMonth('created_at'))
+            .values('month')
+            .annotate(
+                revenue=Sum('total_price'),
+                commission=Sum('commission_amount'),
+                bookings=Count('id')
+            )
+            .order_by('month')
+        )
+        for item in monthly_data:
+            item['month'] = item['month'].strftime('%b %Y')
 
         return Response({
             "metrics": {
@@ -397,7 +635,17 @@ class AdminAnalyticsView(APIView):
         })
 
 class AdminHotelManageView(APIView):
+    def get(self, request):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        hotels = Hotel.objects.all().order_by('name')
+        return Response(HotelSerializer(hotels, many=True).data)
+
     def post(self, request):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
         serializer = HotelSerializer(data=request.data)
         if serializer.is_valid():
             hotel = serializer.save()
@@ -430,6 +678,9 @@ class AdminHotelManageView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def put(self, request, pk):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
         try:
             hotel = Hotel.objects.get(pk=pk)
             serializer = HotelSerializer(hotel, data=request.data, partial=True)
@@ -439,6 +690,18 @@ class AdminHotelManageView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except Hotel.DoesNotExist:
             return Response({"error": "Hotel not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    def delete(self, request, pk):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        try:
+            hotel = Hotel.objects.get(pk=pk)
+        except Hotel.DoesNotExist:
+            return Response({"error": "Hotel not found"}, status=status.HTTP_404_NOT_FOUND)
+        hotel.is_active = False
+        hotel.save(update_fields=['is_active'])
+        return Response({"message": "Hotel listing archived. Booking history has been retained."})
 
 class PartnerRatesView(APIView):
     def post(self, request):
@@ -547,7 +810,7 @@ class PartnerAnalyticsView(APIView):
                 "blocked_rooms": r.blocked_rooms,
                 "available_count": r.available_count,
                 "status": r.status,
-                "revenue": r.rev,
+                "revenue": r_rev,
                 "bookings_count": r_bookings.count()
             })
 
@@ -567,11 +830,17 @@ class PartnerAnalyticsView(APIView):
 
 class AdminPayoutsView(APIView):
     def get(self, request):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
         bookings = Booking.objects.exclude(status__in=['CUSTOMER_CANCELLED', 'PARTNER_CANCELLED']).order_by('-created_at')
         serializer = BookingSerializer(bookings, many=True)
         return Response(serializer.data)
 
     def post(self, request):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
         booking_id = request.data.get('booking_id')
         payout_status = request.data.get('payout_status', '').upper()
         if payout_status not in ['PENDING', 'PROCESSED', 'TRANSFERRED']:
@@ -587,3 +856,327 @@ class AdminPayoutsView(APIView):
         except Booking.DoesNotExist:
             return Response({"error": "Booking record not found"}, status=status.HTTP_404_NOT_FOUND)
 
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Razorpay Payment Gateway Views
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RazorpayCreateOrderView(APIView):
+    """
+    Step 1 of Razorpay checkout.
+    Frontend sends the total_price; we create a Razorpay order and return
+    the order_id + key_id so the frontend can open the Razorpay checkout popup.
+    """
+    def post(self, request):
+        user = BookingListCreateView._authenticated_user(request)
+        if not user:
+            return Response({"error": "Login required."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        total_price = request.data.get('total_price')
+        if not total_price:
+            return Response({"error": "total_price is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            amount_paise = int(float(total_price)) * 100  # Razorpay expects amount in paise
+            order_data = {
+                "amount": amount_paise,
+                "currency": "INR",
+                "payment_capture": 1,  # auto-capture
+            }
+            razorpay_order = razorpay_client.order.create(data=order_data)
+            return Response({
+                "razorpay_order_id": razorpay_order["id"],
+                "amount": amount_paise,
+                "currency": "INR",
+                "key_id": settings.RAZORPAY_KEY_ID,
+            }, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({"error": f"Razorpay order creation failed: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class RazorpayVerifyPaymentView(APIView):
+    """
+    Step 2 of Razorpay checkout.
+    After the user completes payment, Razorpay returns:
+      razorpay_order_id, razorpay_payment_id, razorpay_signature
+    We verify the HMAC signature and then create the booking record.
+    """
+    def post(self, request):
+        user = BookingListCreateView._authenticated_user(request)
+        if not user:
+            return Response({"error": "Login required."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        razorpay_order_id  = request.data.get('razorpay_order_id', '')
+        razorpay_payment_id = request.data.get('razorpay_payment_id', '')
+        razorpay_signature  = request.data.get('razorpay_signature', '')
+        booking_payload     = request.data.get('booking_payload', {})
+
+        # ── Signature Verification ────────────────────────────────────────────
+        body = f"{razorpay_order_id}|{razorpay_payment_id}"
+        expected_signature = hmac.new(
+            settings.RAZORPAY_KEY_SECRET.encode('utf-8'),
+            body.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(expected_signature, razorpay_signature):
+            return Response({"error": "Payment verification failed. Invalid signature."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── Create Booking ────────────────────────────────────────────────────
+        data = booking_payload.copy()
+        data['user'] = user.id
+        data['guest_name'] = user.name
+        data['guest_email'] = user.email
+        data['guest_phone'] = user.phone
+        data['payment_mode'] = 'CARD'
+        data['payment_status'] = 'SUCCESS'
+        data['razorpay_order_id'] = razorpay_order_id
+        data['razorpay_payment_id'] = razorpay_payment_id
+        data['razorpay_signature'] = razorpay_signature
+
+        if 'booking_id' not in data or not data['booking_id']:
+            rand_suffix = ''.join(random.choices(string.digits, k=4))
+            data['booking_id'] = f"TMT-2026-{rand_suffix}"
+
+        # Commission calculation using hotel's rate
+        total = int(data.get('total_price', 0))
+        try:
+            hotel_obj = Hotel.objects.get(pk=data.get('hotel'))
+            comm_rate = hotel_obj.commission_percent
+        except Hotel.DoesNotExist:
+            comm_rate = 10.0
+        comm_amount = int(total * comm_rate / 100)
+        data['commission_rate'] = comm_rate
+        data['commission_amount'] = comm_amount
+        data['net_partner_payout'] = total - comm_amount
+        data['status'] = 'CONFIRMED'
+
+        # Nights snapshot
+        try:
+            from datetime import date as _date
+            ci = data.get('check_in')
+            co = data.get('check_out')
+            if isinstance(ci, str):
+                ci = _date.fromisoformat(ci)
+            if isinstance(co, str):
+                co = _date.fromisoformat(co)
+            data['nights'] = max(1, (co - ci).days)
+        except Exception:
+            data['nights'] = 1
+
+        serializer = BookingSerializer(data=data)
+        if serializer.is_valid():
+            booking = serializer.save()
+            # ── Send confirmation email with PDF voucher ───────────────────
+            try:
+                send_booking_confirmation(booking)
+            except Exception:
+                pass
+            return Response({
+                "message": "Payment verified and booking confirmed!",
+                "booking": serializer.data
+            }, status=status.HTTP_201_CREATED)
+        return Response({"error": "Booking creation failed.", "details": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AdminCommissionSettingsView(APIView):
+    """
+    Admin endpoint to view and update commission_percent per hotel.
+    GET  /api/admin/commission/          → list all hotels with their commission %
+    POST /api/admin/commission/          → update commission % for a hotel
+         body: { hotel_id, commission_percent }
+    """
+    def get(self, request):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        hotels = Hotel.objects.all().values('id', 'name', 'city', 'commission_percent')
+        return Response(list(hotels))
+
+    def post(self, request):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        hotel_id = request.data.get('hotel_id')
+        commission_percent = request.data.get('commission_percent')
+
+        if hotel_id is None or commission_percent is None:
+            return Response({"error": "hotel_id and commission_percent are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            commission_percent = float(commission_percent)
+            if not (0 <= commission_percent <= 100):
+                raise ValueError("Out of range")
+        except (ValueError, TypeError):
+            return Response({"error": "commission_percent must be a number between 0 and 100."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            hotel = Hotel.objects.get(pk=hotel_id)
+            hotel.commission_percent = commission_percent
+            hotel.save(update_fields=['commission_percent'])
+            return Response({
+                "message": f"Commission for '{hotel.name}' updated to {commission_percent}%",
+                "hotel_id": hotel.id,
+                "hotel_name": hotel.name,
+                "commission_percent": hotel.commission_percent,
+            })
+        except Hotel.DoesNotExist:
+            return Response({"error": "Hotel not found."}, status=status.HTTP_404_NOT_FOUND)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Google OAuth Sign-In View
+# ─────────────────────────────────────────────────────────────────────────────
+
+class GoogleAuthView(APIView):
+    """
+    POST /api/auth/google/
+    Body: { credential: "<Google ID token JWT>" }
+
+    Verifies the Google ID token, then:
+    - If the email exists → logs in and returns the user + session token
+    - If new email      → auto-creates a UserProfile (CUSTOMER role) and returns it
+    """
+    def post(self, request):
+        credential = request.data.get('credential', '').strip()
+        if not credential:
+            return Response({"error": "Google credential token is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        google_client_id = settings.GOOGLE_CLIENT_ID
+        if not google_client_id:
+            return Response({"error": "Google Sign-In is not configured on the server."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        # ── Verify the Google ID token ────────────────────────────────────────
+        try:
+            from google.oauth2 import id_token
+            from google.auth.transport import requests as google_requests
+            idinfo = id_token.verify_oauth2_token(
+                credential,
+                google_requests.Request(),
+                google_client_id,
+                clock_skew_in_seconds=10,
+            )
+        except ValueError as e:
+            return Response({"error": f"Invalid Google token: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        email = idinfo.get('email', '').lower()
+        name  = idinfo.get('name', email.split('@')[0])
+        picture = idinfo.get('picture', '')
+
+        if not email:
+            return Response({"error": "Google account has no email address."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── Get or create user ────────────────────────────────────────────────
+        user = UserProfile.objects.filter(email=email).first()
+
+        if not user:
+            # Auto-register new Google user — no password needed
+            user = UserProfile.objects.create(
+                name=name,
+                email=email,
+                phone='',
+                password=make_password(secrets.token_urlsafe(24)),
+                role='CUSTOMER',
+                vendor_status='PENDING',
+            )
+
+        # ── Issue / refresh session token ─────────────────────────────────────
+        auth_token = secrets.token_urlsafe(48)
+        user.auth_token = auth_token
+        user.is_email_verified = True   # ensure it's always true for Google users
+        user.save(update_fields=['auth_token', 'is_email_verified'])
+
+        return Response({
+            "message": "Google Sign-In successful.",
+            "token": auth_token,
+            "user": {
+                "id": user.id,
+                "name": user.name,
+                "email": user.email,
+                "phone": user.phone,
+                "role": user.role,
+                "vendor_status": user.vendor_status,
+                "picture": picture,
+                "hotel": user.hotel_id,
+            }
+        }, status=status.HTTP_200_OK)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Booking Voucher PDF Download (Customer)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class BookingVoucherView(APIView):
+    """
+    GET /api/bookings/voucher/<booking_id>/
+    Returns the PDF voucher as a file download.
+    Only the booking owner (or an admin) can download.
+    """
+    def get(self, request, booking_id):
+        user = BookingListCreateView._authenticated_user(request)
+        if not user:
+            return Response({"error": "Login required."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        try:
+            if user.role == 'ADMIN':
+                booking = Booking.objects.get(booking_id=booking_id)
+            else:
+                booking = Booking.objects.get(booking_id=booking_id, user=user)
+        except Booking.DoesNotExist:
+            return Response({"error": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            pdf_bytes = generate_booking_pdf(booking)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error(
+                "Voucher PDF generation failed for %s: %s", booking_id, type(exc).__name__
+            )
+            return Response({"error": "Could not generate voucher. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        filename = f"Trumitrip_Voucher_{booking.booking_id}.pdf"
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Length'] = len(pdf_bytes)
+        return response
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Admin: Re-send Voucher Email
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AdminResendVoucherView(APIView):
+    """
+    POST /api/admin/resend-voucher/<booking_id>/
+    Resets email_sent=False and retries sending the confirmation email.
+    Admin-only. Safe to call multiple times.
+    """
+    def post(self, request, booking_id):
+        user = BookingListCreateView._authenticated_user(request)
+        if not user or user.role != 'ADMIN':
+            return Response({"error": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            booking = Booking.objects.get(booking_id=booking_id)
+        except Booking.DoesNotExist:
+            return Response({"error": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Reset the sent flag so the idempotency guard allows a retry
+        booking.email_sent = False
+        booking.save(update_fields=['email_sent'])
+
+        success = send_booking_confirmation(booking)
+
+        if success:
+            return Response({
+                "message": f"Confirmation email resent for booking {booking_id}.",
+                "email_sent": True,
+                "email_attempts": booking.email_attempts,
+            })
+        else:
+            return Response({
+                "error": "Email delivery failed. Check email configuration.",
+                "email_sent": False,
+                "email_attempts": booking.email_attempts,
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

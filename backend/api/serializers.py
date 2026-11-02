@@ -3,10 +3,15 @@ from .models import Hotel, Room, Booking, Coupon, Review, UserProfile
 
 class UserProfileSerializer(serializers.ModelSerializer):
     hotel_name = serializers.CharField(source='hotel.name', read_only=True)
+    hotel_city = serializers.CharField(source='hotel.city', read_only=True)
+    hotel_address = serializers.CharField(source='hotel.address', read_only=True)
 
     class Meta:
         model = UserProfile
-        fields = ['id', 'name', 'email', 'phone', 'role', 'vendor_status', 'hotel', 'hotel_name', 'is_email_verified', 'created_at']
+        fields = [
+            'id', 'name', 'email', 'phone', 'role', 'vendor_status', 'hotel',
+            'hotel_name', 'hotel_city', 'hotel_address', 'is_email_verified', 'created_at'
+        ]
 
 class RoomSerializer(serializers.ModelSerializer):
     class Meta:
@@ -35,6 +40,7 @@ class BookingSerializer(serializers.ModelSerializer):
     class Meta:
         model = Booking
         fields = '__all__'
+        read_only_fields = ['email_sent', 'email_sent_at', 'email_attempts']
 
 class CouponSerializer(serializers.ModelSerializer):
     class Meta:

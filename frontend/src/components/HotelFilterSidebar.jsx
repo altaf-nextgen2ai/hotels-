@@ -22,7 +22,7 @@ export default function HotelFilterSidebar({ filters, setFilters, onReset }) {
   };
 
   return (
-    <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-6">
+    <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-6 w-full">
       
       {/* Header */}
       <div className="flex justify-between items-center pb-4 border-b border-slate-100">
@@ -54,31 +54,6 @@ export default function HotelFilterSidebar({ filters, setFilters, onReset }) {
           <option value="price_high_low">Price: High to Low</option>
           <option value="rating">Guest Rating (High to Low)</option>
         </select>
-      </div>
-
-      {/* Price Range Slider */}
-      <div>
-        <div className="flex justify-between items-center mb-2">
-          <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-            Max Price Per Night
-          </label>
-          <span className="text-xs font-black text-[#D4AF37] bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-            ₹{filters.maxPrice ? Number(filters.maxPrice).toLocaleString('en-IN') : '50,000+'}
-          </span>
-        </div>
-        <input 
-          type="range"
-          min="3000"
-          max="80000"
-          step="1000"
-          value={filters.maxPrice || 80000}
-          onChange={(e) => setFilters({ ...filters, maxPrice: e.target.value })}
-          className="w-full accent-[#D4AF37] cursor-pointer"
-        />
-        <div className="flex justify-between text-[10px] text-slate-400 font-bold mt-1">
-          <span>₹3,000</span>
-          <span>₹80,000+</span>
-        </div>
       </div>
 
       {/* Star Rating Filter */}

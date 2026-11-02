@@ -15,8 +15,8 @@ export default function HotelCard({ hotel, onSelectHotel }) {
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden flex flex-col md:flex-row group relative md:h-[280px]">
       
-      {/* Image Banner Container (Fixed Height to fit all photos perfectly) */}
-      <div className="relative md:w-2/5 h-64 md:h-full overflow-hidden shrink-0">
+      {/* Image Banner Container */}
+      <div className="relative w-full h-48 md:w-2/5 md:h-full overflow-hidden shrink-0">
         <img 
           src={hotel.main_image} 
           alt={hotel.name} 
@@ -117,7 +117,7 @@ export default function HotelCard({ hotel, onSelectHotel }) {
         </div>
 
         {/* Agoda Pricing & CTA Footer */}
-        <div className="mt-5 pt-3 border-t border-slate-200/80 flex items-end justify-between">
+        <div className="mt-5 pt-3 border-t border-slate-200/80 flex flex-wrap items-end justify-between gap-3">
           <div>
             <div className="flex items-center gap-1.5 text-slate-400 text-xs line-through font-semibold">
               <span>Original Rack Rate:</span>

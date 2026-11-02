@@ -1,11 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, Download, AlertTriangle, CheckCircle, RefreshCw, Bookmark, User, Phone, Mail } from 'lucide-react';
+import { X, Calendar, Download, AlertTriangle, CheckCircle, RefreshCw, Bookmark, User, Phone, Mail, Loader2 } from 'lucide-react';
 import { apiService } from '../services/api';
 
 export default function UserAccountModal({ onClose, currentUser, userBookings, onCancelBooking }) {
-  const [activeTab, setActiveTab] = useState('bookings'); // 'bookings', 'history', 'wishlist'
+  const [activeTab, setActiveTab] = useState('bookings');
   const [cancellingId, setCancellingId] = useState(null);
   const [cancellationResult, setCancellationResult] = useState(null);
+  const [downloadingId, setDownloadingId] = useState(null);
+  const [downloadError, setDownloadError] = useState('');
+
+  const normalizeStatus = (status) => {
+    const value = String(status || '').toUpperCase();
+    if (value === 'CUSTOMER_CANCELLED' || value === 'PARTNER_CANCELLED' || value === 'CANCELLED') return 'CANCELLED';
+    return value || 'CONFIRMED';
+  };
+
+  const isCancelled = (status) => normalizeStatus(status) === 'CANCELLED';
+
+  const getStatusClasses = (status) => {
+    const normalized = normalizeStatus(status);
+    if (normalized === 'CANCELLED') return 'bg-rose-100 text-rose-700 border border-rose-200';
+    if (normalized === 'CONFIRMED') return 'bg-emerald-100 text-emerald-800 border border-emerald-200';
+    if (normalized === 'PENDING') return 'bg-amber-100 text-amber-800 border border-amber-200';
+    return 'bg-sky-100 text-sky-800 border border-sky-200';
+  };
 
   const handleCancelRequest = async (bookingId) => {
     if (!window.confirm(`Are you sure you want to cancel booking ${bookingId}?`)) return;
@@ -18,7 +36,6 @@ export default function UserAccountModal({ onClose, currentUser, userBookings, o
       setCancellationResult(res);
       onCancelBooking(bookingId);
     } else {
-      // Fallback cancellation
       onCancelBooking(bookingId);
       setCancellationResult({
         booking_id: bookingId,
@@ -29,9 +46,19 @@ export default function UserAccountModal({ onClose, currentUser, userBookings, o
     }
   };
 
+  const handleDownloadVoucher = async (bookingId) => {
+    setDownloadingId(bookingId);
+    setDownloadError('');
+    const result = await apiService.downloadVoucher(bookingId);
+    setDownloadingId(null);
+    if (result?.error) {
+      setDownloadError(`Could not download voucher for ${bookingId}: ${result.error}`);
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-3xl w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 my-8">
+    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 overflow-y-auto">
+      <div className="bg-white rounded-none sm:rounded-3xl max-w-full sm:max-w-3xl w-full shadow-2xl border-0 sm:border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 min-h-screen sm:min-h-0 sm:my-8">
         
         {/* Header */}
         <div className="bg-[#0A192F] text-white px-6 py-4 flex justify-between items-center">
@@ -55,13 +82,13 @@ export default function UserAccountModal({ onClose, currentUser, userBookings, o
             onClick={() => setActiveTab('bookings')}
             className={`py-3 border-b-2 transition ${activeTab === 'bookings' ? 'border-[#D4AF37] text-slate-950' : 'border-transparent hover:text-slate-900'}`}
           >
-            Active Bookings ({userBookings.filter(b => b.status !== 'CANCELLED').length})
+            Active Bookings ({userBookings.filter((b) => !isCancelled(b.status)).length})
           </button>
           <button 
             onClick={() => setActiveTab('history')}
             className={`py-3 border-b-2 transition ${activeTab === 'history' ? 'border-[#D4AF37] text-slate-950' : 'border-transparent hover:text-slate-900'}`}
           >
-            Cancelled / History ({userBookings.filter(b => b.status === 'CANCELLED').length})
+            Cancelled / History ({userBookings.filter((b) => isCancelled(b.status)).length})
           </button>
         </div>
 
@@ -78,22 +105,28 @@ export default function UserAccountModal({ onClose, currentUser, userBookings, o
             </div>
           )}
 
+          {downloadError && (
+            <div className="mb-4 bg-amber-50 border border-amber-200 p-3 rounded-2xl text-xs text-amber-900 font-medium flex justify-between items-center">
+              <span>{downloadError}</span>
+              <button onClick={() => setDownloadError('')} className="text-amber-700 font-bold underline ml-3">Dismiss</button>
+            </div>
+          )}
           {/* ACTIVE BOOKINGS */}
           {activeTab === 'bookings' && (
             <div className="space-y-4">
-              {userBookings.filter(b => b.status !== 'CANCELLED').length === 0 ? (
+              {userBookings.filter((b) => !isCancelled(b.status)).length === 0 ? (
                 <div className="text-center py-12 text-slate-400">
                   <Calendar className="w-12 h-12 mx-auto mb-2 opacity-50" />
                   <p className="font-bold text-sm text-slate-600">No Active Bookings Found</p>
                   <p className="text-xs">Search hotels and book your dream vacation today!</p>
                 </div>
               ) : (
-                userBookings.filter(b => b.status !== 'CANCELLED').map((b, idx) => (
+                userBookings.filter((b) => !isCancelled(b.status)).map((b, idx) => (
                   <div key={idx} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
                     <div className="flex justify-between items-start">
                       <div>
-                        <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">
-                          {b.status || 'CONFIRMED'}
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide ${getStatusClasses(b.status)}`}>
+                          {normalizeStatus(b.status)}
                         </span>
                         <h3 className="text-base font-extrabold text-slate-900 mt-1">{b.hotel_name || b.hotel?.name || 'Taj Exotica Resort'}</h3>
                         <p className="text-xs text-slate-500 font-medium">{b.room_name || b.room?.room_type || 'Deluxe Sea View Room'}</p>
@@ -104,7 +137,7 @@ export default function UserAccountModal({ onClose, currentUser, userBookings, o
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2 bg-slate-50 p-3 rounded-xl text-xs font-semibold text-slate-700">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-slate-50 p-3 rounded-xl text-xs font-semibold text-slate-700">
                       <div>
                         <p className="text-[10px] text-slate-400 font-bold">CHECK-IN</p>
                         <p className="font-bold text-slate-900">{b.check_in}</p>
@@ -121,11 +154,21 @@ export default function UserAccountModal({ onClose, currentUser, userBookings, o
 
                     <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
                       <button 
-                        onClick={() => window.print()}
+                        onClick={() => handleDownloadVoucher(b.booking_id)}
+                        disabled={downloadingId === b.booking_id}
                         className="bg-slate-100 text-slate-800 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-slate-200 transition flex items-center gap-1"
                       >
-                        <Download className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Download Invoice PDF</span>
+                        {downloadingId === b.booking_id ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                            <span>Generating PDF...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-3.5 h-3.5 text-blue-600" />
+                            <span>Download Voucher PDF</span>
+                          </>
+                        )}
                       </button>
                       <button 
                         onClick={() => handleCancelRequest(b.booking_id)}
@@ -144,10 +187,10 @@ export default function UserAccountModal({ onClose, currentUser, userBookings, o
           {/* HISTORY */}
           {activeTab === 'history' && (
             <div className="space-y-3">
-              {userBookings.filter(b => b.status === 'CANCELLED').length === 0 ? (
+              {userBookings.filter((b) => isCancelled(b.status)).length === 0 ? (
                 <p className="text-center text-xs text-slate-400 py-8">No cancelled bookings in history.</p>
               ) : (
-                userBookings.filter(b => b.status === 'CANCELLED').map((b, idx) => (
+                userBookings.filter((b) => isCancelled(b.status)).map((b, idx) => (
                   <div key={idx} className="bg-slate-50 rounded-xl p-4 border border-slate-200 text-xs flex justify-between items-center opacity-80">
                     <div>
                       <p className="font-bold text-slate-900">{b.hotel_name || 'Taj Exotica'}</p>

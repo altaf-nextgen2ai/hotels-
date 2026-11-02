@@ -22,7 +22,7 @@ export default function Footer({ onNavigateView }) {
           </div>
 
           {/* Payment Method Badges */}
-          <div className="flex flex-wrap items-center justify-center gap-4 text-xs font-black tracking-widest text-slate-300">
+          <div className="flex flex-wrap items-center justify-center gap-3 text-xs font-black tracking-widest text-slate-300">
             <span className="bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 font-serif italic text-blue-400">VISA</span>
             <span className="bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 text-rose-400">mastercard</span>
             <span className="bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 text-emerald-400">UPI</span>
@@ -35,7 +35,7 @@ export default function Footer({ onNavigateView }) {
       </div>
 
       {/* Main Footer Links */}
-      <div className="max-w-7xl mx-auto px-4 md:px-8 py-12 grid grid-cols-1 md:grid-cols-4 gap-8">
+      <div className="max-w-7xl mx-auto px-4 md:px-8 py-10 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8">
         
         {/* Col 1: Brand & Bio */}
         <div className="space-y-4">

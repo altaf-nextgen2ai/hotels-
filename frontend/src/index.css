@@ -70,3 +70,157 @@ textarea {
     font-size: 15px;
   }
 }
+
+/* Admin dashboard light theme */
+.admin-dashboard {
+  color: #1e293b;
+  background: #f4f6fb;
+}
+
+.admin-dashboard .bg-slate-900 {
+  background-color: #f8fafc;
+}
+
+.admin-dashboard .bg-slate-800,
+.admin-dashboard .bg-slate-800\/90 {
+  background-color: #ffffff;
+}
+
+.admin-dashboard .bg-slate-700 {
+  background-color: #f1f5f9;
+}
+
+.admin-dashboard .text-white,
+.admin-dashboard .text-slate-100 {
+  color: #172033;
+}
+
+.admin-dashboard .text-slate-200 {
+  color: #334155;
+}
+
+.admin-dashboard .text-slate-300 {
+  color: #475569;
+}
+
+.admin-dashboard .text-slate-400 {
+  color: #64748b;
+}
+
+.admin-dashboard .border-slate-700,
+.admin-dashboard .border-slate-700\/60 {
+  border-color: #e2e8f0;
+}
+
+.admin-dashboard .divide-slate-700 > :not([hidden]) ~ :not([hidden]),
+.admin-dashboard .divide-slate-700\/60 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #e9edf4;
+}
+
+.admin-dashboard .hover\:bg-slate-700\/40:hover {
+  background-color: #f8fafc;
+}
+
+.admin-dashboard .text-emerald-400,
+.admin-dashboard .text-emerald-300 {
+  color: #047857;
+}
+
+.admin-dashboard .text-indigo-400,
+.admin-dashboard .text-indigo-300 {
+  color: #4f46e5;
+}
+
+.admin-dashboard .text-amber-400 {
+  color: #a16207;
+}
+
+.admin-dashboard .text-rose-400,
+.admin-dashboard .text-rose-300 {
+  color: #be123c;
+}
+
+.admin-dashboard .text-\[\#D4AF37\] {
+  color: #967414;
+}
+
+.admin-dashboard .bg-indigo-900\/60 {
+  background-color: #eef2ff;
+}
+
+.admin-dashboard .bg-emerald-500\/20 {
+  background-color: #ecfdf5;
+}
+
+.admin-dashboard .border-emerald-500\/30 {
+  border-color: #a7f3d0;
+}
+
+.admin-dashboard .bg-rose-500\/20 {
+  background-color: #fff1f2;
+}
+
+.admin-dashboard .border-rose-500\/30,
+.admin-dashboard .border-rose-500\/40 {
+  border-color: #fecdd3;
+}
+
+.admin-dashboard .bg-rose-900\/60 {
+  background-color: #fff1f2;
+}
+
+.admin-dashboard .bg-emerald-900\/60 {
+  background-color: #ecfdf5;
+}
+
+.admin-dashboard > div > :first-child {
+  border-color: #e7eaf0;
+  box-shadow: 0 12px 32px rgb(15 23 42 / 5%);
+}
+
+.admin-dashboard .bg-slate-800,
+.admin-dashboard .bg-slate-800\/90 {
+  border-color: #e7eaf0;
+  box-shadow: 0 4px 16px rgb(15 23 42 / 4%);
+}
+
+.admin-dashboard table thead {
+  background-color: #f8fafc;
+}
+
+.admin-dashboard table th {
+  color: #64748b;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+}
+
+.admin-dashboard table td {
+  color: #475569;
+}
+
+.admin-dashboard input,
+.admin-dashboard select {
+  background-color: #f8fafc;
+  border-color: #dbe2ea;
+  color: #172033;
+}
+
+.admin-dashboard input:focus,
+.admin-dashboard select:focus {
+  outline: 2px solid rgb(212 175 55 / 30%);
+  border-color: #c5a43a;
+}
+
+.admin-dashboard button {
+  transition: background-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.admin-dashboard button:hover {
+  box-shadow: 0 4px 12px rgb(15 23 42 / 10%);
+}
+
+@media (max-width: 640px) {
+  .admin-dashboard {
+    padding: 1rem;
+  }
+}

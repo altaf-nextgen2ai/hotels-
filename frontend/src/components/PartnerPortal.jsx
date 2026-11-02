@@ -1,1228 +1,883 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Store, Building, DollarSign, Calendar, Save, Check, Users, Shield, 
-  LogOut, PlusCircle, Hotel, Star, MapPin, Sparkles, TrendingUp, Clock, 
-  Search, Bell, ChevronDown, Eye, MoreVertical, Filter, ArrowUpRight, 
-  ArrowDownRight, HelpCircle, Settings, Layers, ShoppingBag, FileText, 
-  CheckCircle2, Flame, Gift, RefreshCw, Image, Upload, Tag
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  LayoutDashboard, Hotel, BedDouble, IndianRupee, Calendar, LogOut,
+  PlusCircle, TrendingUp, TrendingDown, Users, Star, MapPin,
+  CheckCircle2, Clock, XCircle, AlertTriangle, RefreshCw, Bell,
+  ChevronRight, ArrowUpRight, ArrowDownRight, Banknote, BarChart3,
+  Package, Tag, HelpCircle, Wifi, Coffee, Car, Dumbbell, Waves,
+  Utensils, ShieldCheck, Moon, Save, Building2, Eye, ChevronDown
 } from 'lucide-react';
 import { apiService } from '../services/api';
 
-const PRESET_HOTEL_IMAGES = [
-  { label: 'Luxury Beach Resort', url: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=1200&q=80' },
-  { label: 'Royal Palace & Heritage', url: 'https://images.unsplash.com/photo-1582719508461-905c673771fd?auto=format&fit=crop&w=1200&q=80' },
-  { label: 'Modern Mountain Villa', url: 'https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=1200&q=80' },
-  { label: 'Boutique City Hotel', url: 'https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?auto=format&fit=crop&w=1200&q=80' },
+const fmt = (n) => Number(n || 0).toLocaleString('en-IN');
+
+const STATUS_META = {
+  CONFIRMED:          { label: 'Confirmed',   bg: 'bg-emerald-50',  text: 'text-emerald-700',  border: 'border-emerald-200' },
+  CHECKED_IN:         { label: 'Checked In',  bg: 'bg-blue-50',     text: 'text-blue-700',     border: 'border-blue-200'   },
+  COMPLETED:          { label: 'Completed',   bg: 'bg-slate-100',   text: 'text-slate-600',    border: 'border-slate-200'  },
+  PENDING:            { label: 'Pending',     bg: 'bg-amber-50',    text: 'text-amber-700',    border: 'border-amber-200'  },
+  CUSTOMER_CANCELLED: { label: 'Cancelled',   bg: 'bg-red-50',      text: 'text-red-600',      border: 'border-red-200'    },
+  PARTNER_CANCELLED:  { label: 'Cancelled',   bg: 'bg-red-50',      text: 'text-red-600',      border: 'border-red-200'    },
+};
+
+const NAV = [
+  { id: 'dashboard', label: 'Dashboard',         icon: LayoutDashboard },
+  { id: 'bookings',  label: 'Bookings',           icon: Calendar        },
+  { id: 'rooms',     label: 'Rooms & Rates',      icon: BedDouble       },
+  { id: 'property',  label: 'My Property',        icon: Hotel           },
+  { id: 'revenue',   label: 'Revenue & Payouts',  icon: IndianRupee     },
+  { id: 'register',  label: 'Add New Property',   icon: PlusCircle      },
 ];
 
-const AVAILABLE_AMENITIES = [
-  "WiFi", "Pool", "Spa", "Breakfast", "AC", "Gym", "Beachfront", "Bar", "Parking", "Valet", "Restaurant", "Room Service", "FREE Cancellation", "Pay at Hotel"
-];
+const AMENITY_ICONS = { WiFi: Wifi, Breakfast: Coffee, Parking: Car, Gym: Dumbbell, Pool: Waves, Restaurant: Utensils, Spa: ShieldCheck };
 
+// ── Pending screen ─────────────────────────────────────────────────────────────
+function PendingScreen({ currentUser, onLogout }) {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+      <div className="max-w-md w-full bg-white border border-gray-200 rounded-2xl p-8 text-center shadow-sm space-y-5">
+        <div className="w-14 h-14 mx-auto rounded-full bg-amber-100 flex items-center justify-center">
+          <Clock className="w-7 h-7 text-amber-500" />
+        </div>
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Application Under Review</h2>
+          <p className="text-sm text-gray-500 mt-2">Hi <strong>{currentUser?.name?.split(' ')[0]}</strong>, your partner account is being reviewed by the Trumitrip team.</p>
+        </div>
+        <div className="bg-gray-50 rounded-xl p-4 text-sm text-left space-y-2 text-gray-600">
+          <div className="flex justify-between"><span>Email</span><span className="font-semibold text-gray-800">{currentUser?.email}</span></div>
+          <div className="flex justify-between"><span>Role</span><span className="font-semibold text-gray-800">Hotel Partner</span></div>
+          <div className="flex justify-between"><span>Status</span><span className="text-amber-600 font-bold">Pending Approval</span></div>
+        </div>
+        <button onClick={onLogout} className="w-full py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-sm rounded-xl transition">Sign Out</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Status badge ───────────────────────────────────────────────────────────────
+function StatusBadge({ status }) {
+  const m = STATUS_META[status] || STATUS_META.PENDING;
+  return <span className={`inline-flex items-center text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${m.bg} ${m.text} ${m.border}`}>{m.label}</span>;
+}
+
+// ── Main ───────────────────────────────────────────────────────────────────────
 export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRefreshHotels }) {
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'inventory', 'register', 'bookings'
-  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab,  setActiveTab]  = useState('dashboard');
+  const [analytics,  setAnalytics]  = useState(null);
+  const [bookings,   setBookings]   = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [savingId,   setSavingId]   = useState(null);
+  const [toast,      setToast]      = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // Smooth Tab Switcher with Auto Scroll to Top
-  const switchTab = (tabName) => {
-    setActiveTab(tabName);
-    setTimeout(() => {
-      const mainEl = document.getElementById('vendor-portal-main-content');
-      if (mainEl) mainEl.scrollTop = 0;
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }, 50);
-  };
+  // Get latest user from localStorage (may have been updated after hotel registration)
+  const latestUser = (() => {
+    try { return JSON.parse(localStorage.getItem('trumitrip_user')) || currentUser; }
+    catch { return currentUser; }
+  })();
 
-  // Track hotels created by this vendor in local state & localStorage
-  const [userCreatedHotelIds, setUserCreatedHotelIds] = useState(() => {
-    const saved = localStorage.getItem(`vendor_hotels_${currentUser?.id || 'guest'}`);
-    return saved ? JSON.parse(saved) : [];
-  });
+  const vendorHotels = latestUser?.role === 'ADMIN'
+    ? hotels
+    : hotels.filter(h => String(h.id) === String(latestUser?.hotel));
 
-  // Filter vendor's owned/assigned hotels only
-  const vendorHotels = currentUser?.role === 'ADMIN' 
-    ? hotels 
-    : hotels.filter(h => h.id == currentUser?.hotel || userCreatedHotelIds.includes(h.id));
+  const [selectedHotelId, setSelectedHotelId] = useState(
+    vendorHotels[0]?.id || null
+  );
+  const hotel = vendorHotels.find(h => String(h.id) === String(selectedHotelId)) || vendorHotels[0] || null;
+  const [rooms, setRooms] = useState(hotel?.rooms || []);
 
-  const defaultHotel = vendorHotels[0] || null;
-  const [selectedHotelId, setSelectedHotelId] = useState(defaultHotel?.id || null);
-
-  // Current Active Hotel Object
-  const selectedHotel = vendorHotels.find(h => h.id == selectedHotelId) || defaultHotel || null;
-
-  // Rate & Inventory Form
-  const [roomPrice, setRoomPrice] = useState(selectedHotel?.price_per_night || 8500);
-  const [inventoryCount, setInventoryCount] = useState(selectedHotel?.rooms?.[0]?.available_count || 8);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-
-  // Hotel Bookings List
-  const [hotelBookings, setHotelBookings] = useState([]);
-  const [loadingBookings, setLoadingBookings] = useState(false);
-
-  // New Hotel Registration Form State
+  // New hotel form
   const [newHotel, setNewHotel] = useState({
-    name: '',
-    city: 'Goa',
-    destination: 'Goa',
-    address: '',
-    price_per_night: 8500,
-    original_price: 12500,
-    star_rating: 5,
-    rating_score: 4.8,
-    main_image: PRESET_HOTEL_IMAGES[0].url,
-    amenities: ["WiFi", "Pool", "Breakfast", "AC", "Spa", "FREE Cancellation", "Pay at Hotel"],
-    description: '',
-    is_featured: true
+    name: '', city: 'Goa', address: '', description: '',
+    price_per_night: 8500, original_price: 12500, star_rating: 5,
+    main_image: '',
+    gallery_images: [],
+    amenities: ['WiFi', 'Pool', 'Breakfast', 'AC'], is_featured: true,
   });
+  const [registering, setRegistering] = useState(false);
 
-  const [registeringHotel, setRegisteringHotel] = useState(false);
-  const [registerSuccess, setRegisterSuccess] = useState(false);
-  const [registerError, setRegisterError] = useState('');
-
-  // Sync selected hotel state when switching
-  useEffect(() => {
-    if (selectedHotel) {
-      setRoomPrice(selectedHotel.price_per_night || 8500);
-      setInventoryCount(selectedHotel.rooms?.[0]?.available_count || 8);
-    }
-  }, [selectedHotelId, hotels, selectedHotel]);
-
-  // Fetch Bookings for Selected Hotel
-  const fetchHotelBookings = async () => {
-    if (!selectedHotelId) {
-      setHotelBookings([]);
-      return;
-    }
-    setLoadingBookings(true);
-    const bData = await apiService.getBookings();
-    if (bData && Array.isArray(bData)) {
-      setHotelBookings(bData.filter(b => b.hotel == selectedHotelId || b.hotel_id == selectedHotelId));
-    } else {
-      setHotelBookings([]);
-    }
-    setLoadingBookings(false);
-  };
-
-  useEffect(() => {
-    fetchHotelBookings();
-  }, [selectedHotelId]);
-
-  // Handle Rate Update
-  const handleUpdateRates = async (e) => {
-    e.preventDefault();
-    if (!selectedHotelId) return;
-    setIsSaving(true);
-
-    await apiService.updatePartnerRates({
-      hotel_id: selectedHotelId,
-      room_id: selectedHotel?.rooms?.[0]?.id || 1,
-      new_price: roomPrice,
-      inventory: inventoryCount
+  // ── Image file helpers ────────────────────────────────────────────────────
+  const readFileAsBase64 = (file) =>
+    new Promise((resolve, reject) => {
+      if (file.size > 3 * 1024 * 1024) { reject(new Error(`${file.name} is too large (max 3MB)`)); return; }
+      const reader = new FileReader();
+      reader.onload  = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
     });
 
-    if (onRefreshHotels) await onRefreshHotels();
-    setIsSaving(false);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
+  const handleMainImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const b64 = await readFileAsBase64(file);
+      setNewHotel(p => ({ ...p, main_image: b64 }));
+    } catch (err) { showToast(err.message, 'error'); }
   };
 
-  // Handle New Hotel Registration
-  const handleRegisterHotel = async (e) => {
-    e.preventDefault();
-    if (!newHotel.name || !newHotel.address || !newHotel.city) {
-      setRegisterError("Hotel property name, city, and address are required.");
-      return;
+  const handleGalleryUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    const remaining = 5 - (newHotel.gallery_images?.length || 0);
+    if (remaining <= 0) { showToast('Max 5 gallery images allowed', 'error'); return; }
+    for (const file of files.slice(0, remaining)) {
+      try {
+        const b64 = await readFileAsBase64(file);
+        setNewHotel(p => ({ ...p, gallery_images: [...(p.gallery_images || []), b64] }));
+      } catch (err) { showToast(err.message, 'error'); }
     }
+  };
 
-    setRegisteringHotel(true);
-    setRegisterError('');
+  const removeGalleryImage = (idx) => {
+    setNewHotel(p => ({ ...p, gallery_images: (p.gallery_images || []).filter((_, i) => i !== idx) }));
+  };
 
-    const payload = {
-      name: newHotel.name,
-      city: newHotel.city,
-      destination: newHotel.city || newHotel.destination || 'Goa',
-      address: newHotel.address,
-      price_per_night: Number(newHotel.price_per_night) || 8500,
-      original_price: Number(newHotel.original_price) || 12500,
-      star_rating: Number(newHotel.star_rating) || 5,
-      rating_score: Number(newHotel.rating_score) || 4.8,
-      review_count: 1,
-      main_image: newHotel.main_image || PRESET_HOTEL_IMAGES[0].url,
-      gallery_images: [newHotel.main_image || PRESET_HOTEL_IMAGES[0].url],
-      amenities: newHotel.amenities.length > 0 ? newHotel.amenities : ["WiFi", "Pool", "Breakfast", "AC"],
-      description: newHotel.description?.trim() || `${newHotel.name} is a premier luxury stay located in ${newHotel.city}. Offers world-class hospitality and premium amenities.`,
-      is_featured: Boolean(newHotel.is_featured)
-    };
+  const loadData = useCallback(async () => {
+    if (!hotel?.id) { setLoading(false); return; }
+    setLoading(true);
+    const [analyticsData, bookingsData] = await Promise.all([
+      apiService.getPartnerAnalytics(hotel.id),
+      apiService.getBookings(),
+    ]);
+    if (analyticsData) setAnalytics(analyticsData);
+    if (Array.isArray(bookingsData)) {
+      setBookings(bookingsData.filter(b => String(b.hotel) === String(hotel.id) || String(b.hotel_id) === String(hotel.id)));
+    }
+    setRooms(hotel.rooms || []);
+    setLoading(false);
+  }, [hotel?.id]);
 
-    const res = await apiService.createHotel(payload);
-    setRegisteringHotel(false);
+  useEffect(() => { loadData(); }, [loadData]);
 
-    if (res && res.id) {
-      setRegisterSuccess(true);
-      const updatedIds = [...userCreatedHotelIds, res.id];
-      setUserCreatedHotelIds(updatedIds);
-      localStorage.setItem(`vendor_hotels_${currentUser?.id || 'guest'}`, JSON.stringify(updatedIds));
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
+  const handleUpdateStatus = async (bookingId, newStatus) => {
+    setSavingId(bookingId);
+    const res = await apiService.updatePartnerBookingStatus(bookingId, newStatus);
+    if (res?.booking) {
+      setBookings(prev => prev.map(b => b.booking_id === bookingId ? { ...b, status: newStatus } : b));
+      showToast(`Booking updated to ${newStatus}`);
+    } else showToast('Update failed', 'error');
+    setSavingId(null);
+  };
+
+  const handleSaveRoom = async (room) => {
+    setSavingId(room.id);
+    await apiService.updatePartnerRates({ hotel_id: hotel.id, room_id: room.id, new_price: room.price_per_night, inventory: room.available_count });
+    if (onRefreshHotels) await onRefreshHotels();
+    showToast(`"${room.room_type}" updated`);
+    setSavingId(null);
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    if (!newHotel.main_image) { showToast('Please upload a main image', 'error'); return; }
+    setRegistering(true);
+    const res = await apiService.createHotel({
+      ...newHotel,
+      destination: newHotel.city,
+      rating_score: 4.8,
+      review_count: 0,
+      gallery_images: newHotel.gallery_images || [],
+    });
+    setRegistering(false);
+    if (res?.id) {
+      // Update currentUser in localStorage so hotel shows in sidebar immediately
+      const savedUser = JSON.parse(localStorage.getItem('trumitrip_user') || '{}');
+      if (savedUser && savedUser.role === 'VENDOR') {
+        savedUser.hotel = res.id;
+        savedUser.hotel_name = res.name;
+        localStorage.setItem('trumitrip_user', JSON.stringify(savedUser));
+      }
       if (onRefreshHotels) await onRefreshHotels();
       setSelectedHotelId(res.id);
-      
-      // Reset Form
-      setNewHotel({
-        name: '',
-        city: 'Goa',
-        destination: 'Goa',
-        address: '',
-        price_per_night: 8500,
-        original_price: 12500,
-        star_rating: 5,
-        rating_score: 4.8,
-        main_image: PRESET_HOTEL_IMAGES[0].url,
-        amenities: ["WiFi", "Pool", "Breakfast", "AC", "Spa", "FREE Cancellation", "Pay at Hotel"],
-        description: '',
-        is_featured: true
-      });
-
-      setTimeout(() => {
-        setRegisterSuccess(false);
-        setActiveTab('dashboard');
-      }, 1500);
-    } else {
-      console.error("Hotel Registration API Error:", res);
-      let errorMsg = "Failed to register hotel. Please check required fields.";
-      if (typeof res === 'object' && res !== null) {
-        const errKeys = Object.keys(res);
-        if (errKeys.length > 0) {
-          errorMsg = errKeys.map(k => `${k}: ${Array.isArray(res[k]) ? res[k].join(', ') : res[k]}`).join(' | ');
-        }
-      }
-      setRegisterError(errorMsg);
-    }
+      showToast(`${res.name} registered successfully!`);
+      setActiveTab('dashboard');
+    } else showToast('Registration failed. Check all fields.', 'error');
   };
 
-  // Toggle Amenity Selection
-  const toggleAmenity = (item) => {
-    if (newHotel.amenities.includes(item)) {
-      setNewHotel({ ...newHotel, amenities: newHotel.amenities.filter(a => a !== item) });
-    } else {
-      setNewHotel({ ...newHotel, amenities: [...newHotel.amenities, item] });
-    }
-  };
+  // Metrics
+  const m           = analytics?.metrics || {};
+  const grossRev    = m.gross_revenue       || 0;
+  const commission  = m.platform_commission || 0;
+  const netPayout   = m.net_partner_payout  || 0;
+  const totalBkgs   = m.total_bookings_count || bookings.length;
+  const completedCt = m.completed_count     || bookings.filter(b => b.status === 'COMPLETED').length;
+  const pendingCI   = bookings.filter(b => b.status === 'CONFIRMED').length;
+  const confirmedBkgs = bookings.filter(b => !['CUSTOMER_CANCELLED','PARTNER_CANCELLED'].includes(b.status));
 
-  // Handle Local Device Image File Upload
-  const handleImageFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        alert("Image file size should be less than 5MB");
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setNewHotel(prev => ({ ...prev, main_image: reader.result }));
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  // Calculate Metrics
-  const totalRevenue = hotelBookings.reduce((sum, b) => sum + Number(b.total_price || 0), 0);
-  const confirmedCount = hotelBookings.filter(b => b.status !== 'CANCELLED').length;
-
-  // Approval Pending Guard for Vendors
-  if (currentUser?.role === 'VENDOR' && currentUser?.vendor_status !== 'APPROVED' && currentUser?.role !== 'ADMIN') {
-    return (
-      <div className="min-h-screen bg-slate-900 text-slate-100 p-4 md:p-12 flex items-center justify-center">
-        <div className="max-w-xl w-full bg-slate-800 border border-slate-700 rounded-3xl p-8 shadow-2xl text-center space-y-6">
-          <div className="w-16 h-16 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-3xl flex items-center justify-center mx-auto shadow-lg">
-            <Clock className="w-8 h-8 animate-pulse" />
-          </div>
-
-          <div className="space-y-2">
-            <span className="bg-amber-500/20 text-amber-300 text-xs font-black px-3 py-1 rounded-full uppercase border border-amber-500/30">
-              Application Under Review
-            </span>
-            <h2 className="text-2xl font-black text-white">Vendor Approval Pending</h2>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Welcome <span className="text-amber-400 font-bold">{currentUser?.name}</span>! Your partner vendor account has been submitted to the TRUMITRIP Administration team.
-            </p>
-          </div>
-
-          <div className="p-4 bg-slate-900/80 rounded-2xl border border-slate-700/80 text-left text-xs space-y-2">
-            <div className="flex justify-between border-b border-slate-800 pb-2">
-              <span className="text-slate-400 font-medium">Applicant Email:</span>
-              <span className="font-bold text-white">{currentUser?.email}</span>
-            </div>
-            <div className="flex justify-between border-b border-slate-800 pb-2">
-              <span className="text-slate-400 font-medium">Role:</span>
-              <span className="font-bold text-amber-400 uppercase">Hotel Partner / Vendor</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400 font-medium">Approval Status:</span>
-              <span className="bg-amber-500/20 text-amber-300 font-bold px-2 py-0.5 rounded text-[10px] uppercase">
-                PENDING ADMIN APPROVAL
-              </span>
-            </div>
-          </div>
-
-          <div className="pt-2 flex flex-col gap-3">
-            <button 
-              onClick={onLogout}
-              className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs py-3 rounded-xl transition"
-            >
-              Sign Out & Check Later
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+  if (currentUser?.role === 'VENDOR' && currentUser?.vendor_status !== 'APPROVED') {
+    return <PendingScreen currentUser={currentUser} onLogout={onLogout} />;
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-800 font-sans flex overflow-x-hidden">
-      
-      {/* ================= LEFT SIDEBAR NAVIGATION ================= */}
-      <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col justify-between shrink-0 shadow-2xl z-20 hidden md:flex">
-        <div>
-          {/* Brand Header */}
-          <div className="p-6 border-b border-slate-800 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-600 text-slate-950 flex items-center justify-center font-black text-xl shadow-lg">
-              T
-            </div>
+    <div className="min-h-screen bg-gray-50 flex font-sans">
+
+      {/* ── SIDEBAR ─────────────────────────────────────────────────────────── */}
+      <aside className={`${sidebarOpen ? 'w-56' : 'w-16'} bg-white border-r border-gray-200 flex flex-col transition-all duration-200 shrink-0 hidden md:flex`}>
+        {/* Logo */}
+        <div className="h-14 border-b border-gray-100 flex items-center gap-3 px-4">
+          <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center font-black text-white text-sm shrink-0">T</div>
+          {sidebarOpen && (
             <div>
-              <h2 className="font-black text-white text-lg tracking-tight leading-none">TRUMITRIP</h2>
-              <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mt-1">Vendor Portal</p>
+              <p className="font-black text-gray-900 text-sm leading-none">Trumitrip</p>
+              <p className="text-[9px] text-blue-600 font-semibold uppercase tracking-wider">Partner</p>
             </div>
-          </div>
-
-          {/* Navigation Menu Links */}
-          <nav className="p-4 space-y-1">
-            <div className="px-3 py-2 text-[10px] font-black text-slate-500 uppercase tracking-wider">Hotel Partner App</div>
-
-            <button 
-              onClick={() => switchTab('dashboard')}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-extrabold transition-all duration-200 ${
-                activeTab === 'dashboard' 
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 shadow-lg' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Layers className="w-4 h-4" />
-                <span>Overview & KPI</span>
-              </div>
-            </button>
-
-            <button 
-              onClick={() => switchTab('register')}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-extrabold transition-all duration-200 ${
-                activeTab === 'register' 
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 shadow-lg' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Hotel className="w-4 h-4" />
-                <span>🏨 Register Hotel</span>
-              </div>
-              <PlusCircle className="w-3.5 h-3.5 text-emerald-400" />
-            </button>
-
-            <button 
-              onClick={() => switchTab('add-rooms')}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-extrabold transition-all duration-200 ${
-                activeTab === 'add-rooms' 
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 shadow-lg' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Building className="w-4 h-4" />
-                <span>🛏️ Add Rooms</span>
-              </div>
-            </button>
-
-            <button 
-              onClick={() => switchTab('set-price')}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-extrabold transition-all duration-200 ${
-                activeTab === 'set-price' 
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 shadow-lg' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Tag className="w-4 h-4" />
-                <span>💰 Set Price</span>
-              </div>
-            </button>
-
-            <button 
-              onClick={() => switchTab('inventory')}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-extrabold transition-all duration-200 ${
-                activeTab === 'inventory' 
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 shadow-lg' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Store className="w-4 h-4" />
-                <span>📅 Availability</span>
-              </div>
-            </button>
-
-            <button 
-              onClick={() => switchTab('bookings')}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-extrabold transition-all duration-200 ${
-                activeTab === 'bookings' 
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 shadow-lg' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Calendar className="w-4 h-4" />
-                <span>📋 Manage Bookings</span>
-              </div>
-              <span className="bg-emerald-500/20 text-emerald-300 text-[10px] px-2 py-0.5 rounded-full border border-emerald-500/30">
-                {hotelBookings.length}
-              </span>
-            </button>
-
-            <button 
-              onClick={() => switchTab('revenue')}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-extrabold transition-all duration-200 ${
-                activeTab === 'revenue' 
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 shadow-lg' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <DollarSign className="w-4 h-4" />
-                <span>💵 Revenue & Payouts</span>
-              </div>
-            </button>
-
-            <div className="px-3 pt-6 pb-2 text-[10px] font-black text-slate-500 uppercase tracking-wider">Account & Help</div>
-
-            <button 
-              onClick={() => switchTab('inventory')}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800/60 transition"
-            >
-              <Settings className="w-4 h-4" />
-              <span>Settings</span>
-            </button>
-
-            <button 
-              onClick={() => alert("TRUMITRIP Vendor Support: support@trumitrip.com")}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800/60 transition"
-            >
-              <HelpCircle className="w-4 h-4" />
-              <span>Help & Support</span>
-            </button>
-          </nav>
+          )}
         </div>
 
-        {/* Sidebar Footer User Profile */}
-        <div className="p-4 border-t border-slate-800 bg-slate-950/40">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-black text-emerald-400 text-sm">
-                {currentUser?.name ? currentUser.name[0].toUpperCase() : 'V'}
-              </div>
-              <div className="max-w-[110px] truncate">
-                <p className="text-xs font-extrabold text-white truncate">{currentUser?.name || 'Vendor Partner'}</p>
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Hotel Vendor</p>
-              </div>
-            </div>
-
-            <button 
-              onClick={onLogout}
-              title="Sign Out"
-              className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-xl transition"
+        {/* Hotel selector */}
+        {sidebarOpen && vendorHotels.length > 0 && (
+          <div className="px-3 pt-3 pb-2">
+            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Property</p>
+            <select
+              value={selectedHotelId || ''}
+              onChange={e => setSelectedHotelId(Number(e.target.value))}
+              className="w-full bg-gray-50 border border-gray-200 text-gray-800 text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-400"
             >
-              <LogOut className="w-4 h-4" />
-            </button>
+              {vendorHotels.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+            </select>
           </div>
+        )}
+
+        {/* Nav links */}
+        <nav className="px-2 py-2 flex-1 space-y-0.5">
+          {NAV.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              title={label}
+              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === id
+                  ? 'bg-blue-50 text-blue-700 font-bold'
+                  : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'
+              }`}
+            >
+              <Icon className={`w-4 h-4 shrink-0 ${activeTab === id ? 'text-blue-600' : 'text-gray-400'}`} />
+              {sidebarOpen && <span className="truncate">{label}</span>}
+              {sidebarOpen && id === 'bookings' && bookings.length > 0 && (
+                <span className="ml-auto bg-blue-100 text-blue-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full">{bookings.length}</span>
+              )}
+            </button>
+          ))}
+        </nav>
+
+        {/* User footer */}
+        <div className="px-3 py-3 border-t border-gray-100 flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-700 text-sm shrink-0">
+            {(currentUser?.name || 'V')[0].toUpperCase()}
+          </div>
+          {sidebarOpen && (
+            <>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-gray-800 truncate">{currentUser?.name}</p>
+                <p className="text-[9px] text-gray-400 font-medium">Hotel Partner</p>
+              </div>
+              <button onClick={onLogout} title="Sign Out" className="text-gray-400 hover:text-red-500 transition">
+                <LogOut className="w-4 h-4" />
+              </button>
+            </>
+          )}
         </div>
       </aside>
 
-      {/* ================= MAIN CONTENT CONTAINER ================= */}
-      <div id="vendor-portal-main-content" className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-        
-        {/* Top Header Bar */}
-        <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 shadow-xs">
-          <div className="flex items-center gap-4">
-            {/* Mobile Tab Switcher */}
-            <div className="md:hidden flex items-center gap-2">
-              <span className="font-black text-slate-900 text-base">TRUMITRIP</span>
-            </div>
+      {/* ── MAIN ────────────────────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col min-w-0">
 
-            <h1 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight hidden sm:block">
-              Good morning, <span className="text-emerald-600">{currentUser?.name?.split(' ')[0] || 'Partner'}!</span>
-            </h1>
-          </div>
-
-          {/* Search Bar & User Actions */}
-          <div className="flex items-center gap-4">
-            
-            {/* Search Input */}
-            <div className="relative hidden lg:block w-64">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-              <input 
-                type="text"
-                placeholder="Search bookings, guests..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-slate-100 text-slate-800 text-xs font-bold pl-9 pr-4 py-2.5 rounded-xl border border-transparent focus:border-emerald-500 focus:bg-white focus:outline-none transition"
-              />
-            </div>
-
-            {/* Notification Bell */}
-            <button className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl relative transition">
-              <Bell className="w-4 h-4" />
-              <span className="w-2 h-2 bg-emerald-500 rounded-full absolute top-2 right-2 border-2 border-white"></span>
+        {/* Topbar */}
+        <header className="h-14 bg-white border-b border-gray-200 px-5 flex items-center justify-between sticky top-0 z-10">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-gray-400 hover:text-gray-600 hidden md:block">
+              <BarChart3 className="w-4 h-4" />
             </button>
-
-            {/* Vendor Profile Pill */}
-            <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-              <img 
-                src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80" 
-                alt="Profile" 
-                className="w-9 h-9 rounded-full object-cover border border-emerald-500 shadow-xs"
-              />
-              <div className="hidden sm:block text-left">
-                <p className="text-xs font-extrabold text-slate-900 leading-tight">{currentUser?.name || 'Vendor Admin'}</p>
-                <p className="text-[9px] font-bold text-slate-500 uppercase">Hotel Partner</p>
+            <div>
+              <h1 className="text-sm font-bold text-gray-900">{NAV.find(n => n.id === activeTab)?.label}</h1>
+              {hotel && <p className="text-[10px] text-gray-400">{hotel.name} · {hotel.city}</p>}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={loadData} className={`p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition ${loading ? 'animate-spin' : ''}`}>
+              <RefreshCw className="w-4 h-4" />
+            </button>
+            <button className="relative p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition">
+              <Bell className="w-4 h-4" />
+              {pendingCI > 0 && <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-red-500 rounded-full" />}
+            </button>
+            <div className="flex items-center gap-2 pl-2 border-l border-gray-200">
+              <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-700 text-xs">
+                {(currentUser?.name || 'V')[0].toUpperCase()}
               </div>
+              <span className="text-xs font-semibold text-gray-700 hidden sm:block">{currentUser?.name?.split(' ')[0]}</span>
             </div>
           </div>
         </header>
 
-        {/* Dashboard Body Content */}
-        <main className="p-4 md:p-8 space-y-6">
-          
-          {/* Active Property Selector Header Bar */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-600 rounded-xl">
-                <Building className="w-6 h-6" />
-              </div>
-              <div>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Active Managing Property</span>
-                <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
-                  <span>{selectedHotel ? selectedHotel.name : 'No Property Listed Yet'}</span>
-                  {selectedHotel && (
-                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200">
-                      ★ {selectedHotel.star_rating} Star Luxury
-                    </span>
-                  )}
-                </h3>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 w-full md:w-auto">
-              {vendorHotels.length > 1 && (
-                <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 px-3 py-2 rounded-xl">
-                  <span className="text-xs font-bold text-slate-600">Property:</span>
-                  <select 
-                    value={selectedHotelId || ''}
-                    onChange={(e) => setSelectedHotelId(e.target.value)}
-                    className="bg-transparent font-black text-xs text-slate-900 focus:outline-none"
-                  >
-                    {vendorHotels.map(h => (
-                      <option key={h.id} value={h.id}>{h.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <button 
-                onClick={() => switchTab('register')}
-                className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center gap-1.5 ml-auto"
-              >
-                <PlusCircle className="w-4 h-4" />
-                <span>Add Property</span>
-              </button>
-            </div>
+        {/* Toast */}
+        {toast && (
+          <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg text-sm font-semibold ${
+            toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'
+          }`}>
+            {toast.type === 'error' ? <XCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+            {toast.msg}
           </div>
+        )}
 
-          {/* ================= TAB 1: OVERVIEW DASHBOARD VIEW ================= */}
-          {activeTab === 'dashboard' && (
-            <>
-              {/* 4 TOP KPI METRIC CARDS ROW */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-                
-                {/* KPI 1: Vendor Hotels */}
-                <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-2xl font-black text-slate-900">{vendorHotels.length}</h4>
-                      <p className="text-xs font-bold text-slate-500 mt-0.5">Properties Listed</p>
-                    </div>
-                    <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-600 rounded-2xl">
-                      <Hotel className="w-6 h-6" />
-                    </div>
-                  </div>
-                  <div className="mt-4 flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 w-fit px-2 py-0.5 rounded-md">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>{vendorHotels.length > 0 ? 'Active & Live' : 'Registration Pending'}</span>
-                  </div>
-                </div>
+        <main className="flex-1 p-5 space-y-5 overflow-y-auto">
 
-                {/* KPI 2: Total Confirmed Reservations */}
-                <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-2xl font-black text-slate-900">{confirmedCount}</h4>
-                      <p className="text-xs font-bold text-slate-500 mt-0.5">Total Reservations</p>
-                    </div>
-                    <div className="p-3 bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-2xl">
-                      <ShoppingBag className="w-6 h-6" />
-                    </div>
-                  </div>
-                  <div className="mt-4 flex items-center gap-1 text-[11px] font-bold text-indigo-600 bg-indigo-50 w-fit px-2 py-0.5 rounded-md">
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>Live Bookings</span>
-                  </div>
-                </div>
-
-                {/* KPI 3: Available Room Stock */}
-                <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-2xl font-black text-slate-900">
-                        {selectedHotel ? (selectedHotel?.rooms?.[0]?.available_count || inventoryCount || 0) : 0} Rooms
-                      </h4>
-                      <p className="text-xs font-bold text-slate-500 mt-0.5">Available Stock</p>
-                    </div>
-                    <div className="p-3 bg-amber-50 border border-amber-100 text-amber-600 rounded-2xl">
-                      <Store className="w-6 h-6" />
-                    </div>
-                  </div>
-                  <div className="mt-4 flex items-center gap-1 text-[11px] font-bold text-amber-600 bg-amber-50 w-fit px-2 py-0.5 rounded-md">
-                    <Building className="w-3.5 h-3.5" />
-                    <span>Inventory Control</span>
-                  </div>
-                </div>
-
-                {/* KPI 4: Total Revenue */}
-                <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-2xl font-black text-slate-900">
-                        ₹{totalRevenue.toLocaleString('en-IN')}
-                      </h4>
-                      <p className="text-xs font-bold text-slate-500 mt-0.5">Total Earnings</p>
-                    </div>
-                    <div className="p-3 bg-rose-50 border border-rose-100 text-rose-600 rounded-2xl">
-                      <DollarSign className="w-6 h-6" />
-                    </div>
-                  </div>
-                  <div className="mt-4 flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 w-fit px-2 py-0.5 rounded-md">
-                    <TrendingUp className="w-3.5 h-3.5" />
-                    <span>Real Revenue</span>
-                  </div>
-                </div>
-
+          {/* No hotel warning */}
+          {!hotel && activeTab !== 'register' && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-bold text-gray-800">No property assigned yet</p>
+                <p className="text-xs text-gray-500 mt-0.5">Register your hotel to start receiving bookings.</p>
+                <button onClick={() => setActiveTab('register')} className="mt-2 text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
+                  Register Hotel <ChevronRight className="w-3 h-3" />
+                </button>
               </div>
+            </div>
+          )}
 
-              {/* MIDDLE ROW: REVENUE REPORT CHART & RECENT ACTIVITY FEED */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
-                {/* Revenue Report Multi-Curve Chart (2 Cols) */}
-                <div className="lg:col-span-2 bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
-                      <div>
-                        <h3 className="text-lg font-black text-slate-900">Revenue Report</h3>
-                        <p className="text-xs text-slate-400 font-medium">Real live earnings calculated from customer bookings</p>
-                      </div>
+          {/* ══════════════════════ DASHBOARD ══════════════════════ */}
+          {activeTab === 'dashboard' && hotel && (
+            <div className="space-y-5">
 
-                      {/* Legend & Month Dropdown */}
-                      <div className="flex items-center gap-4">
-                        <div className="hidden sm:flex items-center gap-4 text-xs font-bold">
-                          <span className="flex items-center gap-1.5 text-indigo-600">
-                            <span className="w-2.5 h-2.5 rounded-full bg-indigo-600"></span>
-                            Real Revenue: ₹{totalRevenue.toLocaleString('en-IN')}
-                          </span>
+              {/* KPI cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                  { label: 'Gross Revenue',  value: `₹${fmt(grossRev)}`,  sub: 'All confirmed bookings',   icon: IndianRupee, color: 'blue',   trend: '+12.4%', up: true  },
+                  { label: 'Net Payout',      value: `₹${fmt(netPayout)}`, sub: 'After commission',          icon: Banknote,    color: 'emerald',trend: '+8.1%',  up: true  },
+                  { label: 'Bookings',        value: totalBkgs,            sub: `${completedCt} completed`,  icon: Calendar,    color: 'violet', trend: `${pendingCI} pending`, up: pendingCI > 0 },
+                  { label: 'Occupancy',       value: m.occupancy_rate || '—', sub: 'Current period',         icon: BarChart3,   color: 'orange', trend: 'Live',   up: true  },
+                ].map(({ label, value, sub, icon: Icon, color, trend, up }) => {
+                  const colorMap = {
+                    blue:   { bg: 'bg-blue-50',   icon: 'text-blue-600',   badge: 'text-blue-600' },
+                    emerald:{ bg: 'bg-emerald-50', icon: 'text-emerald-600',badge: 'text-emerald-600' },
+                    violet: { bg: 'bg-violet-50',  icon: 'text-violet-600', badge: 'text-violet-600' },
+                    orange: { bg: 'bg-orange-50',  icon: 'text-orange-600', badge: 'text-orange-600' },
+                  };
+                  const c = colorMap[color];
+                  return (
+                    <div key={label} className="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-sm transition">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className={`w-8 h-8 rounded-lg ${c.bg} flex items-center justify-center`}>
+                          <Icon className={`w-4 h-4 ${c.icon}`} />
                         </div>
+                        <span className={`text-[10px] font-bold flex items-center gap-0.5 ${up ? 'text-emerald-600' : 'text-red-500'}`}>
+                          {up ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                          {trend}
+                        </span>
                       </div>
+                      <p className="text-xl font-black text-gray-900">{value}</p>
+                      <p className="text-xs font-semibold text-gray-500 mt-0.5">{label}</p>
+                      <p className="text-[10px] text-gray-400">{sub}</p>
                     </div>
-
-                    {/* SVG Multi-Curve Chart Visualization */}
-                    <div className="relative h-64 w-full pt-4">
-                      
-                      {/* Tooltip Badge on Peak */}
-                      <div className="absolute left-[40%] top-[15%] bg-slate-900 text-white text-[11px] font-black px-3 py-1.5 rounded-xl shadow-lg flex flex-col items-center z-10">
-                        <span>₹{totalRevenue.toLocaleString('en-IN')}</span>
-                        <span className="text-[9px] text-emerald-400 font-bold">Total Sales</span>
-                        <div className="w-2 h-2 bg-slate-900 rotate-45 -mb-1"></div>
-                      </div>
-
-                      <svg className="w-full h-full overflow-visible" viewBox="0 0 600 200" preserveAspectRatio="none">
-                        {/* Background Grid Lines */}
-                        <line x1="0" y1="40" x2="600" y2="40" stroke="#f1f5f9" strokeDasharray="4 4" />
-                        <line x1="0" y1="90" x2="600" y2="90" stroke="#f1f5f9" strokeDasharray="4 4" />
-                        <line x1="0" y1="140" x2="600" y2="140" stroke="#f1f5f9" strokeDasharray="4 4" />
-
-                        {/* Curve: Earnings (Indigo) */}
-                        <path 
-                          d={totalRevenue > 0 
-                            ? "M 0 150 Q 150 180 250 50 T 450 80 T 600 120" 
-                            : "M 0 160 Q 200 160 400 160 T 600 160"
-                          } 
-                          fill="none" 
-                          stroke="#6366f1" 
-                          strokeWidth="3.5" 
-                        />
-
-                        {/* Curve 2: Bookings (Teal) */}
-                        <path 
-                          d={confirmedCount > 0 
-                            ? "M 0 170 Q 120 120 230 90 T 420 110 T 600 140" 
-                            : "M 0 175 Q 200 175 400 175 T 600 175"
-                          } 
-                          fill="none" 
-                          stroke="#14b8a6" 
-                          strokeWidth="3" 
-                        />
-
-                        {/* Data Points */}
-                        {totalRevenue > 0 && (
-                          <circle cx="250" cy="50" r="5" fill="#6366f1" stroke="#ffffff" strokeWidth="2" />
-                        )}
-                      </svg>
-
-                      {/* Month Labels */}
-                      <div className="flex justify-between text-xs font-bold text-slate-400 mt-2 px-2">
-                        <span>Jan</span>
-                        <span>Feb</span>
-                        <span>Mar</span>
-                        <span>Apr</span>
-                        <span>May</span>
-                        <span>Jun</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Recent Activity Feed Column (1 Col) */}
-                <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
-                      <h3 className="text-lg font-black text-slate-900">Recent Activity</h3>
-                      <MoreVertical className="w-4 h-4 text-slate-400 cursor-pointer" />
-                    </div>
-
-                    {hotelBookings.length === 0 ? (
-                      <div className="py-8 text-center space-y-2">
-                        <Clock className="w-8 h-8 text-slate-300 mx-auto" />
-                        <p className="text-xs font-bold text-slate-500">No guest activity yet</p>
-                        <p className="text-[10px] text-slate-400">Customer reservations will appear here live when booked.</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-4 relative before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100">
-                        {hotelBookings.slice(0, 4).map((b, idx) => (
-                          <div key={b.id || idx} className="relative pl-6">
-                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 absolute left-[3px] top-1 border-2 border-white"></span>
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="font-extrabold text-slate-900">{b.guest_name}</span>
-                              <span className="text-[10px] text-emerald-600 font-bold uppercase">{b.status || 'CONFIRMED'}</span>
-                            </div>
-                            <p className="text-[11px] text-slate-500 mt-0.5">
-                              Booking <span className="font-mono text-indigo-600 font-bold">{b.booking_id}</span> ({b.check_in} - {b.check_out})
-                            </p>
-                            <p className="text-[11px] font-black text-slate-900 mt-1">
-                              ₹{Number(b.total_price).toLocaleString('en-IN')}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
+                  );
+                })}
               </div>
 
-              {/* BOTTOM SECTION: BEST SELLING ROOMS & PROPERTY INVENTORY TABLE */}
-              <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
-                
-                {/* Table Header Controls */}
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                  <h3 className="text-lg font-black text-slate-900">Registered Property & Room Inventory</h3>
-
-                  <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
-                    {/* Search inside table */}
-                    <div className="relative">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-                      <input 
-                        type="text"
-                        placeholder="Search properties..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="bg-slate-100 text-xs font-bold text-slate-800 pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 focus:outline-none"
-                      />
+              {/* Commission summary */}
+              <div className="bg-white border border-gray-200 rounded-xl p-5">
+                <h3 className="text-sm font-bold text-gray-900 mb-4">Commission & Payout Split</h3>
+                <div className="grid grid-cols-3 gap-4">
+                  {[
+                    { label: 'Gross Revenue',      value: grossRev,   bg: 'bg-gray-50',    text: 'text-gray-900' },
+                    { label: 'Platform Commission', value: commission, bg: 'bg-red-50',     text: 'text-red-600'  },
+                    { label: 'Your Net Payout',     value: netPayout,  bg: 'bg-emerald-50', text: 'text-emerald-700' },
+                  ].map(({ label, value, bg, text }) => (
+                    <div key={label} className={`${bg} rounded-xl p-4 border border-gray-100`}>
+                      <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">{label}</p>
+                      <p className={`text-2xl font-black mt-1 ${text}`}>₹{fmt(value)}</p>
                     </div>
-                  </div>
+                  ))}
                 </div>
+                {hotel.commission_percent && (
+                  <p className="text-xs text-gray-400 mt-3">Commission rate: <strong className="text-gray-600">{hotel.commission_percent}%</strong> per booking</p>
+                )}
+              </div>
 
-                {/* Data Table */}
+              {/* Recent bookings */}
+              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div className="px-5 py-3.5 border-b border-gray-100 flex justify-between items-center">
+                  <h3 className="text-sm font-bold text-gray-900">Recent Bookings</h3>
+                  <button onClick={() => setActiveTab('bookings')} className="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1">
+                    View all <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
+                  <table className="w-full">
                     <thead>
-                      <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                        <th className="py-3 px-3">PROPERTY ID</th>
-                        <th className="py-3 px-3">HOTEL / PROPERTY NAME</th>
-                        <th className="py-3 px-3">CATEGORY</th>
-                        <th className="py-3 px-3">LOCATION</th>
-                        <th className="py-3 px-3">NIGHTLY PRICE</th>
-                        <th className="py-3 px-3">ROOM STOCK</th>
-                        <th className="py-3 px-3">RATING</th>
-                        <th className="py-3 px-3">RESERVATIONS</th>
-                        <th className="py-3 px-3">TOTAL REVENUE</th>
-                        <th className="py-3 px-3 text-right">ACTION</th>
+                      <tr className="border-b border-gray-100">
+                        {['Booking ID', 'Guest', 'Room', 'Check-In', 'Nights', 'Amount', 'Status'].map(h => (
+                          <th key={h} className="text-left px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{h}</th>
+                        ))}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 text-xs font-bold text-slate-700">
-                      
-                      {vendorHotels.length === 0 ? (
-                        <tr>
-                          <td colSpan="10" className="py-8 text-center text-slate-400">
-                            No hotel property registered yet. Click <span className="text-emerald-600 font-extrabold cursor-pointer" onClick={() => setActiveTab('register')}>"Register Hotel"</span> to list your property.
-                          </td>
-                        </tr>
-                      ) : (
-                        vendorHotels.map((h, idx) => {
-                          const hBookings = hotelBookings.filter(b => b.hotel == h.id || b.hotel_id == h.id);
-                          const hRev = hBookings.reduce((sum, b) => sum + Number(b.total_price || 0), 0);
-
-                          return (
-                            <tr key={h.id} className="hover:bg-slate-50/80 transition">
-                              <td className="py-3.5 px-3 text-slate-400 font-mono">#P-{h.id}</td>
-                              <td className="py-3.5 px-3 font-extrabold text-slate-900 flex items-center gap-2">
-                                <img src={h.main_image} alt={h.name} className="w-8 h-8 rounded-lg object-cover" />
-                                <span>{h.name}</span>
-                              </td>
-                              <td className="py-3.5 px-3 text-slate-500 font-medium">{h.star_rating} Star Luxury</td>
-                              <td className="py-3.5 px-3">{h.city}, {h.destination}</td>
-                              <td className="py-3.5 px-3 font-black text-slate-900">₹{Number(h.price_per_night).toLocaleString('en-IN')}</td>
-                              <td className="py-3.5 px-3 text-slate-600">{h.rooms?.[0]?.available_count || inventoryCount || 8} Rooms</td>
-                              <td className="py-3.5 px-3 text-emerald-600 font-black">{h.rating_score} ★</td>
-                              <td className="py-3.5 px-3">{hBookings.length} Bookings</td>
-                              <td className="py-3.5 px-3 font-black text-emerald-600">₹{hRev.toLocaleString('en-IN')}</td>
-                              <td className="py-3.5 px-3 text-right">
-                                <button 
-                                  onClick={() => { setSelectedHotelId(h.id); setActiveTab('inventory'); }}
-                                  className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-black rounded-lg transition"
-                                >
-                                  Update Rates
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-
+                    <tbody className="divide-y divide-gray-50">
+                      {bookings.length === 0 ? (
+                        <tr><td colSpan={7} className="text-center py-10 text-sm text-gray-400">No bookings yet</td></tr>
+                      ) : bookings.slice(0, 6).map(b => {
+                        const nights = Math.max(1, Math.round((new Date(b.check_out) - new Date(b.check_in)) / 86400000));
+                        return (
+                          <tr key={b.booking_id} className="hover:bg-gray-50 transition">
+                            <td className="px-4 py-3 text-xs font-bold text-blue-600">{b.booking_id}</td>
+                            <td className="px-4 py-3">
+                              <p className="text-xs font-semibold text-gray-800">{b.guest_name}</p>
+                              <p className="text-[10px] text-gray-400">{b.guest_email}</p>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-gray-600">{b.room_name || '—'}</td>
+                            <td className="px-4 py-3 text-xs text-gray-600">{b.check_in}</td>
+                            <td className="px-4 py-3 text-xs font-semibold text-gray-700">{nights}N</td>
+                            <td className="px-4 py-3 text-xs font-bold text-gray-900">₹{fmt(b.total_price)}</td>
+                            <td className="px-4 py-3"><StatusBadge status={b.status} /></td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
-
-                {/* Table Footer Pagination */}
-                <div className="flex items-center justify-between pt-4 border-t border-slate-100 text-xs font-bold text-slate-500">
-                  <span>Showing {vendorHotels.length} Properties</span>
-                  <div className="flex items-center gap-2">
-                    <button className="px-3 py-1 bg-emerald-600 text-white font-black rounded-lg">01</button>
-                  </div>
-                </div>
-
-              </div>
-            </>
-          )}
-
-          {/* ================= TAB 2: ROOM RATES & INVENTORY ================= */}
-          {activeTab === 'inventory' && (
-            <div className="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 space-y-6 shadow-sm">
-              <div className="border-b border-slate-100 pb-4 flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-black text-slate-900">Manage Room Rates & Daily Inventory</h3>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Set nightly prices and available room count for live publishing on TRUMITRIP.
-                  </p>
-                </div>
-                <button 
-                  onClick={() => setActiveTab('register')}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
-                >
-                  <PlusCircle className="w-4 h-4" />
-                  <span>Register New Hotel Property</span>
-                </button>
               </div>
 
-              {!selectedHotel ? (
-                <div className="p-8 text-center space-y-3 bg-slate-50 rounded-2xl border border-slate-200">
-                  <Hotel className="w-12 h-12 text-slate-400 mx-auto" />
-                  <h4 className="text-base font-black text-slate-800">No Active Property Assigned</h4>
-                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                    You haven't listed a hotel property yet. Click below to register your hotel manually.
-                  </p>
-                  <button 
-                    onClick={() => setActiveTab('register')}
-                    className="bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 font-black text-xs px-5 py-3 rounded-xl shadow"
-                  >
-                    Register Your Hotel Property Now
-                  </button>
-                </div>
-              ) : (
-                <form onSubmit={handleUpdateRates} className="space-y-6 max-w-2xl">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-2">Nightly Rate for Deluxe Room (₹) *</label>
-                      <input 
-                        type="number"
-                        required
-                        value={roomPrice}
-                        onChange={(e) => setRoomPrice(e.target.value)}
-                        className="w-full p-3.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-black text-slate-900 focus:border-emerald-500 focus:outline-none"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-2">Available Daily Room Stock *</label>
-                      <input 
-                        type="number"
-                        required
-                        value={inventoryCount}
-                        onChange={(e) => setInventoryCount(e.target.value)}
-                        className="w-full p-3.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-black text-slate-900 focus:border-emerald-500 focus:outline-none"
-                      />
-                    </div>
+              {/* Room performance */}
+              {analytics?.room_breakdown?.length > 0 && (
+                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="px-5 py-3.5 border-b border-gray-100">
+                    <h3 className="text-sm font-bold text-gray-900">Room Performance</h3>
                   </div>
-
-                  <button 
-                    type="submit"
-                    disabled={isSaving}
-                    className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 font-black text-sm py-4 rounded-xl hover:brightness-105 shadow-md transition flex items-center justify-center gap-2"
-                  >
-                    {isSaving ? (
-                      <span>Publishing Changes...</span>
-                    ) : saveSuccess ? (
-                      <>
-                        <Check className="w-5 h-5" />
-                        <span>Published Live to TRUMITRIP!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Save className="w-5 h-5" />
-                        <span>Publish Updated Rates & Inventory</span>
-                      </>
-                    )}
-                  </button>
-                </form>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-100">
+                          {['Room Type','Total','Available','Bookings','Revenue','Status'].map(h => (
+                            <th key={h} className="text-left px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {analytics.room_breakdown.map(r => (
+                          <tr key={r.room_id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-xs font-semibold text-gray-800">{r.room_type}</td>
+                            <td className="px-4 py-3 text-xs text-gray-600">{r.total_rooms}</td>
+                            <td className="px-4 py-3 text-xs font-bold text-emerald-600">{r.available_count}</td>
+                            <td className="px-4 py-3 text-xs text-gray-600">{r.bookings_count}</td>
+                            <td className="px-4 py-3 text-xs font-bold text-gray-900">₹{fmt(r.revenue)}</td>
+                            <td className="px-4 py-3">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${r.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
+                                {r.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               )}
             </div>
           )}
 
-          {/* ================= TAB 3: REGISTER NEW HOTEL PROPERTY ================= */}
-          {activeTab === 'register' && (
-            <div className="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 space-y-6 shadow-sm">
-              <div className="border-b border-slate-100 pb-4">
-                <h3 className="text-xl font-black text-slate-900">Register New Hotel Property</h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Fill out complete property details for instant listing on TRUMITRIP.
-                </p>
+          {/* ══════════════════════ BOOKINGS ══════════════════════ */}
+          {activeTab === 'bookings' && (
+            <div className="space-y-3">
+              {/* Summary strip */}
+              <div className="grid grid-cols-4 gap-3">
+                {[
+                  { label: 'Total',      count: bookings.length,                                                          color: 'bg-gray-100 text-gray-700'    },
+                  { label: 'Confirmed',  count: bookings.filter(b => b.status === 'CONFIRMED').length,                   color: 'bg-emerald-100 text-emerald-700' },
+                  { label: 'Checked In', count: bookings.filter(b => b.status === 'CHECKED_IN').length,                  color: 'bg-blue-100 text-blue-700'    },
+                  { label: 'Cancelled',  count: bookings.filter(b => b.status.includes('CANCELLED')).length,             color: 'bg-red-100 text-red-600'      },
+                ].map(({ label, count, color }) => (
+                  <div key={label} className={`${color} rounded-xl px-4 py-3 text-center`}>
+                    <p className="text-xl font-black">{count}</p>
+                    <p className="text-xs font-semibold mt-0.5">{label}</p>
+                  </div>
+                ))}
               </div>
 
-              {registerError && (
-                <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 font-bold text-xs rounded-xl">
-                  {registerError}
+              {bookings.length === 0 ? (
+                <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
+                  <Calendar className="w-10 h-10 mx-auto text-gray-300 mb-3" />
+                  <p className="font-semibold text-gray-500 text-sm">No bookings for this property yet</p>
                 </div>
-              )}
-
-              {registerSuccess && (
-                <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold text-xs rounded-xl flex items-center gap-2">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                  <span>Hotel property registered successfully! Redirecting...</span>
-                </div>
-              )}
-
-              <form onSubmit={handleRegisterHotel} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Hotel Property Name *</label>
-                    <input 
-                      type="text"
-                      required
-                      value={newHotel.name}
-                      onChange={(e) => setNewHotel({ ...newHotel, name: e.target.value })}
-                      placeholder="e.g. Taj Exotica Resort & Spa"
-                      className="w-full p-3.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:border-emerald-500 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">City / Location *</label>
-                    <input 
-                      type="text"
-                      required
-                      list="portal-city-list"
-                      value={newHotel.city}
-                      onChange={(e) => setNewHotel({ ...newHotel, city: e.target.value, destination: e.target.value })}
-                      placeholder="e.g. Udaipur, Shimla, Goa, Dubai"
-                      className="w-full p-3.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:border-emerald-500 focus:outline-none"
-                    />
-                    <datalist id="portal-city-list">
-                      {["Goa", "Mumbai", "Delhi", "Manali", "Jaipur", "Dubai", "Paris", "Singapore", "Bengaluru", "Udaipur", "Shimla", "Agra", "Kolkata", "Kochi", "Varanasi"].map(c => (
-                        <option key={c} value={c} />
-                      ))}
-                    </datalist>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Star Rating</label>
-                    <select 
-                      value={newHotel.star_rating}
-                      onChange={(e) => setNewHotel({ ...newHotel, star_rating: Number(e.target.value) })}
-                      className="w-full p-3.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:border-emerald-500 focus:outline-none"
-                    >
-                      <option value={5}>5 Star Luxury</option>
-                      <option value={4}>4 Star Deluxe</option>
-                      <option value={3}>3 Star Premium</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Full Property Address *</label>
-                  <input 
-                    type="text"
-                    required
-                    value={newHotel.address}
-                    onChange={(e) => setNewHotel({ ...newHotel, address: e.target.value })}
-                    placeholder="e.g. Benaulim Beach, South Goa, Goa 403716"
-                    className="w-full p-3.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:border-emerald-500 focus:outline-none"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Base Price per Night (₹) *</label>
-                    <input 
-                      type="number"
-                      required
-                      value={newHotel.price_per_night}
-                      onChange={(e) => setNewHotel({ ...newHotel, price_per_night: Number(e.target.value) })}
-                      placeholder="8500"
-                      className="w-full p-3.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:border-emerald-500 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Original Price (₹ - for Strike Discount)</label>
-                    <input 
-                      type="number"
-                      value={newHotel.original_price}
-                      onChange={(e) => setNewHotel({ ...newHotel, original_price: Number(e.target.value) })}
-                      placeholder="12500"
-                      className="w-full p-3.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:border-emerald-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-2">Property Main Photo *</label>
-                  
-                  <div className="space-y-4">
-                    
-                    {/* Option 1: File Upload Box */}
-                    <div className="border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-2xl p-5 text-center bg-slate-50 hover:bg-emerald-50/30 transition relative group cursor-pointer">
-                      <input 
-                        type="file" 
-                        accept="image/*"
-                        onChange={handleImageFileUpload}
-                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-20"
-                      />
-                      <div className="flex flex-col items-center justify-center space-y-1.5 pointer-events-none">
-                        <div className="p-3 bg-emerald-100 text-emerald-700 rounded-2xl group-hover:scale-110 transition shadow-xs">
-                          <Image className="w-6 h-6" />
+              ) : bookings.map(b => {
+                const nights = Math.max(1, Math.round((new Date(b.check_out) - new Date(b.check_in)) / 86400000));
+                return (
+                  <div key={b.booking_id} className="bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-sm transition">
+                    <div className="p-5">
+                      {/* Top row */}
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-start gap-3">
+                          <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-700 text-sm shrink-0">
+                            {b.guest_name?.[0]?.toUpperCase() || 'G'}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-bold text-gray-900">{b.guest_name}</p>
+                              <StatusBadge status={b.status} />
+                            </div>
+                            <p className="text-xs text-gray-400 mt-0.5">{b.guest_email} · {b.guest_phone}</p>
+                          </div>
                         </div>
-                        <p className="text-xs font-black text-slate-900">
-                          📸 Click or Drag to Upload Hotel Photo from Computer/Mobile
-                        </p>
-                        <p className="text-[10px] font-bold text-slate-500">
-                          PNG, JPG, WEBP formats supported (Max size 5MB)
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Live Image Preview Badge */}
-                    {newHotel.main_image && (
-                      <div className="relative rounded-2xl overflow-hidden h-44 border-2 border-emerald-500 shadow-md group">
-                        <img src={newHotel.main_image} alt="Hotel Preview" className="w-full h-full object-cover" />
-                        <div className="absolute top-3 left-3 bg-slate-950/80 backdrop-blur-md text-emerald-400 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-wider flex items-center gap-1">
-                          <Check className="w-3.5 h-3.5" />
-                          <span>Selected Photo Preview</span>
+                        <div className="text-right">
+                          <p className="text-xs font-bold text-blue-600">{b.booking_id}</p>
+                          <p className="text-[10px] text-gray-400 mt-0.5">Booked {new Date(b.created_at).toLocaleDateString('en-IN')}</p>
                         </div>
                       </div>
-                    )}
 
-                    {/* Option 2: Choose Presets */}
-                    <div>
-                      <p className="text-[11px] font-bold text-slate-500 mb-2">Or Choose from Preset Luxury Hotel Photos:</p>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        {PRESET_HOTEL_IMAGES.map((img, idx) => (
-                          <div 
-                            key={idx}
-                            onClick={() => setNewHotel({ ...newHotel, main_image: img.url })}
-                            className={`relative rounded-xl overflow-hidden cursor-pointer border-2 transition ${
-                              newHotel.main_image === img.url ? 'border-emerald-600 scale-105 shadow-md' : 'border-slate-200 opacity-70 hover:opacity-100'
-                            }`}
-                          >
-                            <img src={img.url} alt={img.label} className="w-full h-20 object-cover" />
-                            <span className="absolute bottom-0 inset-x-0 bg-slate-900/80 text-[9px] font-bold text-white text-center p-1 truncate">
-                              {img.label}
-                            </span>
+                      {/* Details grid */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        {[
+                          ['Room',         b.room_name || '—'],
+                          ['Check-In',     b.check_in],
+                          ['Check-Out',    b.check_out],
+                          ['Duration',     `${nights} Night${nights > 1 ? 's' : ''}`],
+                          ['Rooms · Guests', `${b.rooms_count || 1}R · ${b.guests_count || 1}G`],
+                          ['Payment',      b.payment_mode?.replace('_', ' ') || '—'],
+                          ['Total Paid',   `₹${fmt(b.total_price)}`],
+                          ['Your Payout',  `₹${fmt(b.net_partner_payout)}`],
+                        ].map(([label, val]) => (
+                          <div key={label} className="bg-gray-50 rounded-lg p-2.5">
+                            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">{label}</p>
+                            <p className="text-xs font-semibold text-gray-800 mt-0.5">{val}</p>
                           </div>
                         ))}
                       </div>
+
+                      {b.special_requests && (
+                        <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                          <span className="font-bold">Request: </span>{b.special_requests}
+                        </div>
+                      )}
                     </div>
 
-                    {/* Option 3: Custom URL Input */}
+                    {/* Actions */}
+                    {!['COMPLETED','CUSTOMER_CANCELLED','PARTNER_CANCELLED'].includes(b.status) && (
+                      <div className="bg-gray-50 border-t border-gray-100 px-5 py-2.5 flex gap-2 flex-wrap">
+                        {b.status === 'CONFIRMED' && (
+                          <button onClick={() => handleUpdateStatus(b.booking_id, 'CHECKED_IN')} disabled={savingId === b.booking_id}
+                            className="text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition disabled:opacity-60 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            {savingId === b.booking_id ? 'Updating...' : 'Mark Checked-In'}
+                          </button>
+                        )}
+                        {b.status === 'CHECKED_IN' && (
+                          <button onClick={() => handleUpdateStatus(b.booking_id, 'COMPLETED')} disabled={savingId === b.booking_id}
+                            className="text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg transition disabled:opacity-60 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            {savingId === b.booking_id ? 'Updating...' : 'Mark Completed'}
+                          </button>
+                        )}
+                        <button onClick={() => handleUpdateStatus(b.booking_id, 'PARTNER_CANCELLED')} disabled={savingId === b.booking_id}
+                          className="text-xs font-semibold bg-white hover:bg-red-50 text-red-600 border border-red-200 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+                          <XCircle className="w-3.5 h-3.5" /> Cancel Booking
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ══════════════════════ ROOMS & RATES ══════════════════════ */}
+          {activeTab === 'rooms' && hotel && (
+            <div className="space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2 text-xs text-amber-700">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
+                Rate changes apply to all future bookings. Existing bookings are unaffected.
+              </div>
+              {(hotel.rooms || []).length === 0 ? (
+                <div className="bg-white border border-gray-200 rounded-xl p-10 text-center text-gray-400 text-sm">No rooms added yet.</div>
+              ) : (hotel.rooms || []).map(r => {
+                const lr = rooms.find(x => x.id === r.id) || r;
+                return (
+                  <div key={r.id} className="bg-white border border-gray-200 rounded-xl p-5 space-y-4 hover:shadow-sm transition">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-gray-900">{r.room_type}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{r.bed_type} · Max {r.max_guests} guests</p>
+                        <div className="flex gap-1.5 mt-2 flex-wrap">
+                          {(r.inclusions || []).map(inc => (
+                            <span key={inc} className="text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-100 px-2 py-0.5 rounded-full">{inc}</span>
+                          ))}
+                        </div>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${r.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
+                        {r.status}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Price / Night (₹)</label>
+                        <input type="number" value={lr.price_per_night}
+                          onChange={e => setRooms(prev => {
+                            const exists = prev.find(x => x.id === r.id);
+                            return exists ? prev.map(x => x.id === r.id ? { ...x, price_per_night: Number(e.target.value) } : x) : [...prev, { ...r, price_per_night: Number(e.target.value) }];
+                          })}
+                          className="w-full bg-gray-50 border-2 border-gray-200 focus:border-blue-400 rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none transition"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Available Rooms</label>
+                        <input type="number" min={0} max={r.total_rooms} value={lr.available_count}
+                          onChange={e => setRooms(prev => {
+                            const exists = prev.find(x => x.id === r.id);
+                            return exists ? prev.map(x => x.id === r.id ? { ...x, available_count: Number(e.target.value) } : x) : [...prev, { ...r, available_count: Number(e.target.value) }];
+                          })}
+                          className="w-full bg-gray-50 border-2 border-gray-200 focus:border-blue-400 rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none transition"
+                        />
+                      </div>
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <p className="text-[10px] text-gray-400 font-bold uppercase">Total Rooms</p>
+                        <p className="text-lg font-black text-gray-800 mt-0.5">{r.total_rooms}</p>
+                      </div>
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <p className="text-[10px] text-gray-400 font-bold uppercase">Blocked</p>
+                        <p className="text-lg font-black text-red-500 mt-0.5">{r.blocked_rooms}</p>
+                      </div>
+                    </div>
+                    <button onClick={() => handleSaveRoom(lr)} disabled={savingId === r.id}
+                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs px-4 py-2 rounded-lg transition disabled:opacity-60">
+                      <Save className="w-3.5 h-3.5" />
+                      {savingId === r.id ? 'Saving...' : 'Save Changes'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ══════════════════════ MY PROPERTY ══════════════════════ */}
+          {activeTab === 'property' && hotel && (
+            <div className="space-y-4">
+              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div className="h-52 relative">
+                  <img src={hotel.main_image} alt={hotel.name} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end p-5">
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-500 mb-1">Or Enter Direct Image Web URL Link:</label>
-                      <input 
-                        type="text"
-                        value={newHotel.main_image}
-                        onChange={(e) => setNewHotel({ ...newHotel, main_image: e.target.value })}
-                        placeholder="https://images.unsplash.com/photo-..."
-                        className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:border-emerald-500 focus:outline-none"
-                      />
+                      <div className="flex gap-0.5 mb-1">
+                        {Array.from({ length: hotel.star_rating }).map((_, i) => <Star key={i} className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" />)}
+                      </div>
+                      <h2 className="text-xl font-black text-white">{hotel.name}</h2>
+                      <p className="text-xs text-gray-300 flex items-center gap-1 mt-0.5"><MapPin className="w-3 h-3" />{hotel.address}, {hotel.city}</p>
                     </div>
-
                   </div>
                 </div>
+                <div className="p-5 space-y-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {[
+                      ['Rating', `${hotel.rating_score} ⭐`],
+                      ['Reviews', hotel.review_count],
+                      ['Base Price', `₹${fmt(hotel.price_per_night)}/night`],
+                      ['Commission', `${hotel.commission_percent || 10}%`],
+                    ].map(([label, val]) => (
+                      <div key={label} className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{label}</p>
+                        <p className="text-sm font-black text-gray-800 mt-0.5">{val}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">About This Property</p>
+                    <p className="text-sm text-gray-600 leading-relaxed">{hotel.description}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Amenities</p>
+                    <div className="flex flex-wrap gap-2">
+                      {(hotel.amenities || []).map(a => {
+                        const Icon = AMENITY_ICONS[a];
+                        return (
+                          <span key={a} className="flex items-center gap-1.5 text-xs font-semibold bg-white border border-gray-200 text-gray-700 px-3 py-1 rounded-full">
+                            {Icon && <Icon className="w-3 h-3 text-blue-500" />} {a}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {hotel.gallery_images?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Gallery</p>
+                      <div className="grid grid-cols-4 gap-2">
+                        {hotel.gallery_images.slice(0, 4).map((img, i) => (
+                          <img key={i} src={img} alt="" className="h-20 w-full object-cover rounded-xl border border-gray-200" />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
+          {/* ══════════════════════ REVENUE ══════════════════════ */}
+          {activeTab === 'revenue' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                {[
+                  { label: 'Gross Revenue',      value: grossRev,   bg: 'bg-gray-50',    vColor: 'text-gray-900',    desc: 'Customer total payments' },
+                  { label: 'Platform Commission', value: commission, bg: 'bg-red-50',     vColor: 'text-red-600',     desc: `${hotel?.commission_percent || 10}% Trumitrip fee` },
+                  { label: 'Your Net Payout',     value: netPayout,  bg: 'bg-emerald-50', vColor: 'text-emerald-700', desc: 'To be settled to your account' },
+                ].map(({ label, value, bg, vColor, desc }) => (
+                  <div key={label} className={`${bg} border border-gray-200 rounded-xl p-5`}>
+                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">{label}</p>
+                    <p className={`text-3xl font-black mt-2 ${vColor}`}>₹{fmt(value)}</p>
+                    <p className="text-xs text-gray-400 mt-1">{desc}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-100">
+                  <h3 className="text-sm font-bold text-gray-900">Booking-wise Payout Ledger</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-100">
+                        {['Booking ID','Guest','Total Paid','Commission','Your Payout','Payout Status','Mode'].map(h => (
+                          <th key={h} className="text-left px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {confirmedBkgs.length === 0 ? (
+                        <tr><td colSpan={7} className="text-center py-10 text-sm text-gray-400">No confirmed bookings yet.</td></tr>
+                      ) : confirmedBkgs.map(b => (
+                        <tr key={b.booking_id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-xs font-bold text-blue-600">{b.booking_id}</td>
+                          <td className="px-4 py-3 text-xs text-gray-700 font-semibold">{b.guest_name}</td>
+                          <td className="px-4 py-3 text-xs font-bold text-gray-900">₹{fmt(b.total_price)}</td>
+                          <td className="px-4 py-3 text-xs font-semibold text-red-500">-₹{fmt(b.commission_amount)}</td>
+                          <td className="px-4 py-3 text-xs font-bold text-emerald-600">₹{fmt(b.net_partner_payout)}</td>
+                          <td className="px-4 py-3">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${b.payout_status === 'TRANSFERRED' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                              {b.payout_status || 'PENDING'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-gray-500">{b.payment_mode?.replace('_',' ')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ══════════════════════ REGISTER ══════════════════════ */}
+          {activeTab === 'register' && (
+            <form onSubmit={handleRegister} className="max-w-2xl">
+              <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-5">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-2">Select Hotel Amenities & Badges</label>
+                  <h3 className="text-base font-bold text-gray-900">Register New Property</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Fill in the details below to list your hotel on Trumitrip</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {[
+                    { label: 'Hotel Name *', key: 'name', type: 'text', placeholder: 'e.g. Taj Exotica Resort' },
+                    { label: 'City *', key: 'city', type: 'text', placeholder: 'e.g. Goa' },
+                    { label: 'Full Address *', key: 'address', type: 'text', placeholder: 'Street, Area, City' },
+                    { label: 'Price / Night (₹) *', key: 'price_per_night', type: 'number', placeholder: '8500' },
+                    { label: 'Original Price (₹)', key: 'original_price', type: 'number', placeholder: '12500' },
+                    { label: 'Star Rating (1-5)', key: 'star_rating', type: 'number', placeholder: '5' },
+                  ].map(({ label, key, type, placeholder }) => (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1.5">{label}</label>
+                      <input type={type} required={label.includes('*')} value={newHotel[key]}
+                        onChange={e => setNewHotel(p => ({ ...p, [key]: e.target.value }))}
+                        placeholder={placeholder}
+                        className="w-full bg-gray-50 border-2 border-gray-200 focus:border-blue-400 rounded-lg px-3 py-2.5 text-sm focus:outline-none transition"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1.5">Description</label>
+                  <textarea rows={3} value={newHotel.description} onChange={e => setNewHotel(p => ({ ...p, description: e.target.value }))}
+                    placeholder="Describe your property — location, unique features, guest experience..."
+                    className="w-full bg-gray-50 border-2 border-gray-200 focus:border-blue-400 rounded-lg px-3 py-2.5 text-sm focus:outline-none resize-none transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                    Main Cover Photo <span className="text-red-500">*</span>
+                  </label>
+                  <label className="flex flex-col items-center justify-center w-full h-32 bg-gray-50 border-2 border-dashed border-gray-300 hover:border-blue-400 rounded-xl cursor-pointer transition group">
+                    {newHotel.main_image ? (
+                      <img src={newHotel.main_image} alt="main" className="w-full h-full object-cover rounded-xl" />
+                    ) : (
+                      <div className="text-center">
+                        <div className="w-8 h-8 mx-auto mb-2 rounded-full bg-blue-100 flex items-center justify-center">
+                          <PlusCircle className="w-4 h-4 text-blue-600" />
+                        </div>
+                        <p className="text-xs font-semibold text-gray-500">Click to upload main photo</p>
+                        <p className="text-[10px] text-gray-400 mt-0.5">JPG, PNG · Max 3MB</p>
+                      </div>
+                    )}
+                    <input type="file" accept="image/*" className="hidden" onChange={handleMainImageUpload} />
+                  </label>
+                  {newHotel.main_image && (
+                    <button type="button" onClick={() => setNewHotel(p => ({ ...p, main_image: '' }))}
+                      className="mt-1.5 text-[11px] text-red-500 hover:underline font-semibold">
+                      Remove main photo
+                    </button>
+                  )}
+                </div>
+
+                {/* Gallery photos */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                    Gallery Photos <span className="text-gray-400 font-normal">(Up to 5 photos)</span>
+                  </label>
+                  <div className="flex gap-2 flex-wrap">
+                    {(newHotel.gallery_images || []).map((img, idx) => (
+                      <div key={idx} className="relative w-20 h-16 rounded-lg overflow-hidden border border-gray-200 group">
+                        <img src={img} alt={`gallery ${idx}`} className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => removeGalleryImage(idx)}
+                          className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition"
+                        >
+                          <XCircle className="w-5 h-5 text-white" />
+                        </button>
+                      </div>
+                    ))}
+                    {(newHotel.gallery_images || []).length < 5 && (
+                      <label className="w-20 h-16 rounded-lg border-2 border-dashed border-gray-300 hover:border-blue-400 flex flex-col items-center justify-center cursor-pointer transition">
+                        <PlusCircle className="w-4 h-4 text-gray-400" />
+                        <p className="text-[9px] text-gray-400 mt-0.5 font-semibold">Add</p>
+                        <input type="file" accept="image/*" multiple className="hidden" onChange={handleGalleryUpload} />
+                      </label>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-1.5">
+                    {(newHotel.gallery_images || []).length}/5 photos added · These show in the hotel details slideshow
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-2">Amenities</label>
                   <div className="flex flex-wrap gap-2">
-                    {AVAILABLE_AMENITIES.map(item => (
-                      <button
-                        type="button"
-                        key={item}
-                        onClick={() => toggleAmenity(item)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                          newHotel.amenities.includes(item)
-                            ? 'bg-emerald-600 text-white shadow'
-                            : 'bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200'
-                        }`}
+                    {['WiFi','Pool','Spa','Breakfast','AC','Gym','Beachfront','Bar','Parking','Valet','Restaurant','Room Service','FREE Cancellation','Pay at Hotel'].map(a => (
+                      <button key={a} type="button"
+                        onClick={() => setNewHotel(p => ({ ...p, amenities: p.amenities.includes(a) ? p.amenities.filter(x => x !== a) : [...p.amenities, a] }))}
+                        className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition ${newHotel.amenities.includes(a) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`}
                       >
-                        <Check className={`w-3.5 h-3.5 ${newHotel.amenities.includes(item) ? 'opacity-100' : 'opacity-0'}`} />
-                        <span>{item}</span>
+                        {a}
                       </button>
                     ))}
                   </div>
-
-                  <label className="flex items-center gap-2 text-xs font-bold text-emerald-800 cursor-pointer mt-3 bg-emerald-50 p-3 rounded-xl border border-emerald-200 w-fit">
-                    <input 
-                      type="checkbox"
-                      checked={newHotel.is_featured}
-                      onChange={(e) => setNewHotel({ ...newHotel, is_featured: e.target.checked })}
-                      className="w-4 h-4 accent-emerald-600 rounded"
-                    />
-                    <Sparkles className="w-4 h-4 text-emerald-600" />
-                    <span>Enable AGODA VIP MEMBER DEAL Badge on Customer Listing</span>
-                  </label>
                 </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Hotel Overview & Description *</label>
-                  <textarea 
-                    rows="3"
-                    required
-                    value={newHotel.description}
-                    onChange={(e) => setNewHotel({ ...newHotel, description: e.target.value })}
-                    placeholder="Describe your luxury hotel property, rooms, dining, and unique features..."
-                    className="w-full p-3.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:border-emerald-500 focus:outline-none"
-                  ></textarea>
-                </div>
-
-                <button 
-                  type="submit"
-                  disabled={registeringHotel}
-                  className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 font-black text-sm py-4 rounded-xl hover:brightness-105 shadow-md transition flex items-center justify-center gap-2"
-                >
-                  {registeringHotel ? (
-                    <span>Registering Hotel Property...</span>
-                  ) : (
-                    <>
-                      <PlusCircle className="w-5 h-5" />
-                      <span>Register Property to TRUMITRIP</span>
-                    </>
-                  )}
-                </button>
-              </form>
-            </div>
-          )}
-
-          {/* ================= TAB 4: GUEST BOOKINGS LEDGER ================= */}
-          {activeTab === 'bookings' && (
-            <div className="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 space-y-6 shadow-sm">
-              <div className="border-b border-slate-100 pb-4 flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-black text-slate-900">Guest Reservations Ledger</h3>
-                  <p className="text-xs text-slate-500 mt-1">Live customer bookings for {selectedHotel?.name || 'your property'}</p>
-                </div>
-                <button 
-                  onClick={fetchHotelBookings}
-                  className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition flex items-center gap-1 text-xs font-bold"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  <span>Refresh</span>
+                <button type="submit" disabled={registering}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm py-3 rounded-xl transition flex items-center justify-center gap-2 disabled:opacity-60">
+                  {registering ? <><RefreshCw className="w-4 h-4 animate-spin" /> Registering...</> : <><PlusCircle className="w-4 h-4" /> Register Property</>}
                 </button>
               </div>
-
-              {loadingBookings ? (
-                <div className="py-12 text-center text-xs font-bold text-slate-400">Loading guest bookings...</div>
-              ) : hotelBookings.length === 0 ? (
-                <div className="py-12 text-center text-xs font-bold text-slate-400">
-                  No reservations received for this hotel yet.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                        <th className="py-3 px-3">Booking ID</th>
-                        <th className="py-3 px-3">Guest Name</th>
-                        <th className="py-3 px-3">Contact</th>
-                        <th className="py-3 px-3">Dates</th>
-                        <th className="py-3 px-3">Amount</th>
-                        <th className="py-3 px-3">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-xs font-bold text-slate-700">
-                      {hotelBookings.map(b => (
-                        <tr key={b.id} className="hover:bg-slate-50 transition">
-                          <td className="py-3.5 px-3 font-mono font-black text-indigo-600">{b.booking_id}</td>
-                          <td className="py-3.5 px-3 font-extrabold text-slate-900">{b.guest_name}</td>
-                          <td className="py-3.5 px-3 text-slate-500">{b.guest_email}</td>
-                          <td className="py-3.5 px-3">{b.check_in} to {b.check_out}</td>
-                          <td className="py-3.5 px-3 font-black text-slate-900">₹{Number(b.total_price).toLocaleString('en-IN')}</td>
-                          <td className="py-3.5 px-3">
-                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2.5 py-1 rounded-full uppercase">
-                              {b.status || 'CONFIRMED'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+            </form>
           )}
 
         </main>
       </div>
-
     </div>
   );
 }

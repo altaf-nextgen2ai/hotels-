@@ -14,44 +14,71 @@ import AuthModal from './components/AuthModal';
 import AdminDashboard from './components/AdminDashboard';
 import PartnerPortal from './components/PartnerPortal';
 import BecomePartnerPage from './components/BecomePartnerPage';
+import VendorLoginPage from './components/VendorLoginPage';
+import AdminLoginPage from './components/AdminLoginPage';
 import Footer from './components/Footer';
 import { apiService } from './services/api';
-import { Building2 } from 'lucide-react';
+import { Building2, SlidersHorizontal, X } from 'lucide-react';
 
 export default function App() {
-  // Current view: 'customer', 'admin', 'partner', 'become-partner'
+  // Current view: 'customer', 'admin', 'partner', 'become-partner', 'vendor-login', 'admin-login'
   const [currentView, setCurrentView] = useState(() => {
+    const savedUser = (() => {
+      try { return JSON.parse(localStorage.getItem('trumitrip_user')); } catch { return null; }
+    })();
+
     const pathname = window.location.pathname.toLowerCase();
     const params = new URLSearchParams(window.location.search);
     const viewParam = params.get('view');
     const hash = window.location.hash.replace('#', '').toLowerCase();
 
-    if (
-      pathname.includes('/become-partner') || 
-      viewParam === 'become-partner' || 
-      hash === 'become-partner'
-    ) return 'become-partner';
+    const isAdmin  = savedUser?.role === 'ADMIN';
+    const isVendor = savedUser?.role === 'VENDOR' && savedUser?.vendor_status === 'APPROVED';
 
-    if (
-      pathname.includes('/vendor') || 
-      pathname.includes('/partner') || 
-      viewParam === 'partner' || 
-      viewParam === 'vendor' || 
-      hash === 'partner' || 
-      hash === 'vendor'
-    ) return 'partner';
+    // Dedicated login portals — always accessible
+    if (pathname.includes('/vendor-login') || viewParam === 'vendor-login' || hash === 'vendor-login') return 'vendor-login';
+    if (pathname.includes('/admin-login')  || viewParam === 'admin-login'  || hash === 'admin-login')  return 'admin-login';
 
-    if (
-      pathname.includes('/admin') || 
-      viewParam === 'admin' || 
-      hash === 'admin'
-    ) return 'admin';
+    if (pathname.includes('/become-partner') || viewParam === 'become-partner' || hash === 'become-partner') return 'become-partner';
+
+    // Protected views — only if already logged in with correct role
+    if (pathname.includes('/partner') || pathname.includes('/vendor') || viewParam === 'partner' || viewParam === 'vendor' || hash === 'partner' || hash === 'vendor') {
+      if (isAdmin) return 'admin'; // Admin goes to admin panel, not partner
+      return isVendor ? 'partner' : 'vendor-login';
+    }
+    if (pathname.includes('/admin') || viewParam === 'admin' || hash === 'admin') {
+      return isAdmin ? 'admin' : 'admin-login';
+    }
 
     return 'customer';
   });
 
   // Sync browser address bar URL cleanly when switching views
-  const handleNavigateView = (viewName) => {
+  const handleNavigateView = (viewName, userOverride = currentUser) => {
+    const user = userOverride || currentUser;
+
+    // ── Role-based access guard ──────────────────────────────────────────────
+    if (viewName === 'admin') {
+      if (user?.role !== 'ADMIN') {
+        setCurrentView('admin-login');
+        window.history.pushState({}, '', '/admin-login');
+        return;
+      }
+    }
+    if (viewName === 'partner') {
+      const isVendor = user?.role === 'VENDOR' && user?.vendor_status === 'APPROVED';
+      // Admin cannot access partner portal — they use admin panel
+      if (!isVendor) {
+        if (user?.role === 'ADMIN') {
+          setCurrentView('admin');
+          window.history.pushState({}, '', '/admin');
+        } else {
+          setCurrentView('vendor-login');
+          window.history.pushState({}, '', '/vendor-login');
+        }
+        return;
+      }
+    }
     setCurrentView(viewName);
     const cleanPath = viewName === 'customer' ? '/' : `/${viewName}`;
     window.history.pushState({ view: viewName }, '', cleanPath);
@@ -87,14 +114,17 @@ export default function App() {
 
   // Modal States
   const [selectedHotelForDetails, setSelectedHotelForDetails] = useState(null);
-  const [selectedRoomForCheckout, setSelectedRoomForCheckout] = useState(null);
   const [checkoutHotel, setCheckoutHotel] = useState(null);
+  const [checkoutRoom,  setCheckoutRoom]  = useState(null);
   const [bookingPayloadForPayment, setBookingPayloadForPayment] = useState(null);
   const [paymentHotel, setPaymentHotel] = useState(null);
-  const [paymentRoom, setPaymentRoom] = useState(null);
+  const [paymentRoom,  setPaymentRoom]  = useState(null);
 
   const [showBookingsModal, setShowBookingsModal] = useState(false);
   const [userBookings, setUserBookings] = useState([]);
+
+  // Mobile filter panel
+  const [showMobileFilter, setShowMobileFilter] = useState(false);
 
   // Handle User Login & Automatic Dashboard Routing
   const handleLoginSuccess = (userObj) => {
@@ -104,15 +134,15 @@ export default function App() {
 
     // Automatic role-based redirect
     if (userObj.role === 'ADMIN') {
-      handleNavigateView('admin');
+      handleNavigateView('admin', userObj);
     } else if (userObj.role === 'VENDOR') {
       if (userObj.vendor_status === 'APPROVED') {
-        handleNavigateView('partner');
+        handleNavigateView('partner', userObj);
       } else {
-        handleNavigateView('become-partner');
+        handleNavigateView('become-partner', userObj);
       }
     } else {
-      handleNavigateView('customer');
+      handleNavigateView('customer', userObj);
     }
   };
 
@@ -153,23 +183,25 @@ export default function App() {
   // Handle Search Submission
   const handleSearch = (searchData) => {
     setSearchDetails(searchData);
-    loadHotelsData({ city: searchData.city });
+    // Send search query to backend — searches city, destination, name AND address
+    loadHotelsData({ city: searchData.city, search: searchData.city });
     const element = document.getElementById('hotel-results-section');
     if (element) element.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Filtered & Sorted Hotels
+  // Filtered & Sorted Hotels — also searches address for area/locality names
   const filteredHotels = hotels.filter(h => {
     if (searchDetails.city && searchDetails.city.trim() !== '') {
-      const q = searchDetails.city.toLowerCase();
-      if (!h.city.toLowerCase().includes(q) && !h.destination.toLowerCase().includes(q) && !h.name.toLowerCase().includes(q)) {
-        return false;
-      }
+      const q = searchDetails.city.toLowerCase().trim();
+      const matchesSearch =
+        h.city?.toLowerCase().includes(q) ||
+        h.destination?.toLowerCase().includes(q) ||
+        h.name?.toLowerCase().includes(q) ||
+        h.address?.toLowerCase().includes(q) ||        // area/locality match
+        h.description?.toLowerCase().includes(q);      // description match
+      if (!matchesSearch) return false;
     }
     if (filters.starRating !== 'all' && h.star_rating < Number(filters.starRating)) {
-      return false;
-    }
-    if (filters.maxPrice && h.price_per_night > Number(filters.maxPrice)) {
       return false;
     }
     if (filters.amenities && filters.amenities.length > 0) {
@@ -184,7 +216,7 @@ export default function App() {
     return b.review_count - a.review_count;
   });
 
-  // Handlers for booking flow
+  // Booking flow: Book Room Now → Checkout form → Payment
   const handleBookRoomStart = (hotel, room) => {
     if (!currentUser) {
       setShowAuthModal(true);
@@ -192,16 +224,12 @@ export default function App() {
     }
     setSelectedHotelForDetails(null);
     setCheckoutHotel(hotel);
-    setSelectedRoomForCheckout(room || {
-      id: 101,
-      room_type: "Deluxe Executive Room",
-      price_per_night: hotel.price_per_night
-    });
+    setCheckoutRoom(room);
   };
 
   const handleProceedToPayment = (payload, hotel, room) => {
     setCheckoutHotel(null);
-    setSelectedRoomForCheckout(null);
+    setCheckoutRoom(null);
     setBookingPayloadForPayment(payload);
     setPaymentHotel(hotel);
     setPaymentRoom(room);
@@ -215,10 +243,14 @@ export default function App() {
     setUserBookings(userBookings.map(b => b.booking_id === bookingId ? { ...b, status: 'CANCELLED' } : b));
   };
 
+  // Don't show Header/Footer on dedicated auth portals
+  const isAuthPortal = ['vendor-login', 'admin-login'].includes(currentView);
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 font-sans flex flex-col justify-between">
-      
-      {/* Clean Header without Public Mode Switcher */}
+
+      {/* Header — hidden on login portals */}
+      {!isAuthPortal && (
       <Header 
         currentUser={currentUser}
         onOpenAuth={() => setShowAuthModal(true)}
@@ -232,6 +264,7 @@ export default function App() {
         }}
         onOpenSupport={() => alert('TRUMITRIP 24/7 Support Desk:\nToll Free: 1800-270-0297\nWhatsApp: +91 8470009000')}
       />
+      )}
 
       {/* VIEW 1: CUSTOMER PORTAL */}
       {currentView === 'customer' && (
@@ -271,10 +304,49 @@ export default function App() {
               </div>
             </div>
 
+            {/* Mobile Filters toggle button */}
+            <div className="md:hidden mb-4">
+              <button
+                onClick={() => setShowMobileFilter(!showMobileFilter)}
+                className="flex items-center gap-2 bg-white border border-slate-200 shadow-sm text-slate-700 font-bold text-sm px-4 py-3 rounded-xl w-full justify-between min-h-[44px]"
+              >
+                <span className="flex items-center gap-2">
+                  <SlidersHorizontal className="w-4 h-4 text-[#D4AF37]" />
+                  Filters &amp; Sort
+                  {(filters.starRating !== 'all' || filters.amenities.length > 0) && (
+                    <span className="bg-[#D4AF37] text-slate-950 text-[10px] font-black px-1.5 py-0.5 rounded-full">
+                      {(filters.starRating !== 'all' ? 1 : 0) + filters.amenities.length}
+                    </span>
+                  )}
+                </span>
+                {showMobileFilter
+                  ? <X className="w-4 h-4 text-slate-400" />
+                  : <span className="text-xs text-slate-400">{showMobileFilter ? 'Hide' : 'Show'}</span>
+                }
+              </button>
+            </div>
+
+            {/* Mobile filter panel */}
+            {showMobileFilter && (
+              <div className="md:hidden mb-4">
+                <HotelFilterSidebar 
+                  filters={filters}
+                  setFilters={setFilters}
+                  onReset={() => { setFilters({ starRating: 'all', maxPrice: 80000, amenities: [], sortBy: 'popular' }); setShowMobileFilter(false); }}
+                />
+                <button
+                  onClick={() => setShowMobileFilter(false)}
+                  className="mt-3 w-full bg-[#0F172A] text-[#D4AF37] font-black text-sm py-3 rounded-xl min-h-[44px]"
+                >
+                  Apply Filters
+                </button>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               
-              {/* Filter Sidebar */}
-              <div className="lg:col-span-4">
+              {/* Filter Sidebar — desktop only */}
+              <div className="hidden md:block lg:col-span-4">
                 <HotelFilterSidebar 
                   filters={filters}
                   setFilters={setFilters}
@@ -340,6 +412,22 @@ export default function App() {
         />
       )}
 
+      {/* VIEW 5: VENDOR LOGIN PORTAL */}
+      {currentView === 'vendor-login' && (
+        <VendorLoginPage
+          onLoginSuccess={handleLoginSuccess}
+          onNavigateView={handleNavigateView}
+        />
+      )}
+
+      {/* VIEW 6: ADMIN LOGIN PORTAL */}
+      {currentView === 'admin-login' && (
+        <AdminLoginPage
+          onLoginSuccess={handleLoginSuccess}
+          onNavigateView={handleNavigateView}
+        />
+      )}
+
       {/* AUTH MODAL (Login / Signup) */}
       {showAuthModal && (
         <AuthModal 
@@ -357,13 +445,13 @@ export default function App() {
         />
       )}
 
-      {checkoutHotel && selectedRoomForCheckout && (
-        <BookingCheckoutModal 
+      {checkoutHotel && checkoutRoom && (
+        <BookingCheckoutModal
           hotel={checkoutHotel}
-          room={selectedRoomForCheckout}
+          room={checkoutRoom}
           currentUser={currentUser}
           searchDetails={searchDetails}
-          onClose={() => { setCheckoutHotel(null); setSelectedRoomForCheckout(null); }}
+          onClose={() => { setCheckoutHotel(null); setCheckoutRoom(null); }}
           onProceedToPayment={handleProceedToPayment}
         />
       )}
@@ -387,8 +475,8 @@ export default function App() {
         />
       )}
 
-      {/* Footer */}
-      <Footer onNavigateView={handleNavigateView} />
+      {/* Footer — hidden on login portals */}
+      {!isAuthPortal && <Footer onNavigateView={handleNavigateView} />}
 
     </div>
   );
