@@ -1,9 +1,33 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Star, MapPin, Sparkles, ArrowRight, ShieldCheck, Flame, Gift } from 'lucide-react';
 
 export default function HotelCard({ hotel, onSelectHotel, layout = 'list' }) {
   const isGrid = layout === 'grid';
-  const discountPercent = Math.round(((hotel.original_price - hotel.price_per_night) / hotel.original_price) * 100);
+  const photos = useMemo(() => {
+    const unique = [];
+    [hotel.main_image, ...(hotel.gallery_images || [])].forEach((src) => {
+      if (src && !unique.includes(src)) unique.push(src);
+    });
+    return unique;
+  }, [hotel.main_image, hotel.gallery_images]);
+  const [photoIndex, setPhotoIndex] = useState(0);
+
+  useEffect(() => {
+    setPhotoIndex(0);
+  }, [hotel.id]);
+
+  useEffect(() => {
+    if (photos.length < 2) return undefined;
+    const timer = window.setInterval(() => {
+      setPhotoIndex((current) => (current + 1) % photos.length);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [photos.length]);
+
+  const activePhoto = photos[photoIndex] || hotel.main_image;
+  const discountPercent = hotel.original_price
+    ? Math.round(((hotel.original_price - hotel.price_per_night) / hotel.original_price) * 100)
+    : 0;
 
   // Helper for Agoda-style rating category text
   const getRatingLabel = (score) => {
@@ -18,11 +42,31 @@ export default function HotelCard({ hotel, onSelectHotel, layout = 'list' }) {
       
       {/* Image Banner Container */}
       <div className={`relative w-full h-48 overflow-hidden shrink-0 ${isGrid ? 'sm:h-52' : 'md:h-full md:w-2/5'}`}>
-        <img 
-          src={hotel.main_image} 
-          alt={hotel.name} 
-          className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
-        />
+        {photos.map((src, idx) => (
+          <img
+            key={`${hotel.id}-${idx}`}
+            src={src}
+            alt={`${hotel.name} photo ${idx + 1}`}
+            className={`absolute inset-0 h-full w-full object-cover object-center transition-opacity duration-700 ${
+              idx === photoIndex ? 'opacity-100' : 'opacity-0'
+            }`}
+          />
+        ))}
+        {!photos.length && (
+          <img src={activePhoto} alt={hotel.name} className="h-full w-full object-cover object-center" />
+        )}
+        {photos.length > 1 && (
+          <div className="absolute bottom-3 right-3 z-10 flex gap-1">
+            {photos.map((_, idx) => (
+              <span
+                key={`dot-${idx}`}
+                className={`h-1.5 rounded-full transition-all ${
+                  idx === photoIndex ? 'w-4 bg-white' : 'w-1.5 bg-white/50'
+                }`}
+              />
+            ))}
+          </div>
+        )}
 
         {/* Agoda Style Badges Overlay */}
         <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-10">
