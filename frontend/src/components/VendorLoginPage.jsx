@@ -30,7 +30,7 @@ export default function VendorLoginPage({ onLoginSuccess, onNavigateView }) {
       return;
     }
 
-    onLoginSuccess(user);
+    onLoginSuccess(user, res.token);
   };
 
   return (

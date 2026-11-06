@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { X, Calendar, Download, AlertTriangle, CheckCircle, RefreshCw, Bookmark, User, Phone, Mail, Loader2 } from 'lucide-react';
 import { apiService } from '../services/api';
 
-export default function UserAccountModal({ onClose, currentUser, userBookings, onCancelBooking }) {
+export default function UserAccountModal({ onClose, currentUser, userBookings, onCancelBooking, onRequireLogin }) {
   const [activeTab, setActiveTab] = useState('bookings');
   const [cancellingId, setCancellingId] = useState(null);
   const [cancellationResult, setCancellationResult] = useState(null);
+  const [cancellationError, setCancellationError] = useState('');
   const [downloadingId, setDownloadingId] = useState(null);
   const [downloadError, setDownloadError] = useState('');
 
@@ -25,25 +26,62 @@ export default function UserAccountModal({ onClose, currentUser, userBookings, o
     return 'bg-sky-100 text-sky-800 border border-sky-200';
   };
 
+  const formatRefundSummary = (quote) => {
+    const fee = Number(quote.cancellation_fee || 0);
+    const refund = Number(quote.refund_amount || 0);
+    const paid = Number(quote.amount_paid || 0);
+    if (refund > 0) {
+      return (
+        `Amount paid: ₹${paid.toLocaleString('en-IN')}\n` +
+        `Cancellation fee (10%): ₹${fee.toLocaleString('en-IN')}\n` +
+        `Refund to you (90%): ₹${refund.toLocaleString('en-IN')}\n` +
+        `Expected in your account within 2 to 5 working days.`
+      );
+    }
+    return (
+      `Amount paid: ₹${paid.toLocaleString('en-IN')}\n` +
+      `Cancellation fee: ₹${fee.toLocaleString('en-IN')}\n` +
+      'No refund is due for this booking.'
+    );
+  };
+
   const handleCancelRequest = async (bookingId) => {
-    if (!window.confirm(`Are you sure you want to cancel booking ${bookingId}?`)) return;
-    
+    setCancellationError('');
+    const quote = await apiService.getCancellationQuote(bookingId);
+    if (quote?.error) {
+      if (quote.status === 401) {
+        setCancellationError('Your session expired. Please sign in again from the header, then retry cancellation.');
+        onRequireLogin?.();
+        return;
+      }
+      setCancellationError(quote.error);
+      return;
+    }
+    if (quote.already_cancelled) {
+      setCancellationResult(quote);
+      onCancelBooking(quote);
+      return;
+    }
+
+    const refundMessage = formatRefundSummary(quote);
+    if (!window.confirm(`Cancel booking ${bookingId}?\n\n${refundMessage}`)) return;
+
     setCancellingId(bookingId);
     const res = await apiService.cancelBooking(bookingId);
     setCancellingId(null);
 
-    if (res && res.status === 'CANCELLED') {
-      setCancellationResult(res);
-      onCancelBooking(bookingId);
-    } else {
-      onCancelBooking(bookingId);
-      setCancellationResult({
-        booking_id: bookingId,
-        refund_amount: 11699,
-        cancellation_fee: 1300,
-        message: 'Booking cancelled successfully'
-      });
+    if (res?.error) {
+      if (res.status === 401) {
+        setCancellationError('Your session expired. Please sign in again from the header, then retry cancellation.');
+        onRequireLogin?.();
+        return;
+      }
+      setCancellationError(res.error);
+      return;
     }
+
+    setCancellationResult(res);
+    onCancelBooking(res);
   };
 
   const handleDownloadVoucher = async (bookingId) => {
@@ -57,18 +95,18 @@ export default function UserAccountModal({ onClose, currentUser, userBookings, o
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 overflow-y-auto">
-      <div className="bg-white rounded-none sm:rounded-3xl max-w-full sm:max-w-3xl w-full shadow-2xl border-0 sm:border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 min-h-screen sm:min-h-0 sm:my-8">
+    <div className="fixed inset-0 z-[100] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 overflow-hidden">
+      <div className="bg-white rounded-none sm:rounded-3xl max-w-full sm:max-w-3xl w-full h-[100dvh] sm:h-auto max-h-[100dvh] sm:max-h-[calc(100dvh-2rem)] shadow-2xl border-0 sm:border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 flex flex-col">
         
         {/* Header */}
-        <div className="bg-[#0A192F] text-white px-6 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-3">
+        <div className="bg-[#0A192F] text-white px-4 sm:px-6 py-4 flex justify-between items-center shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-full bg-[#D4AF37] text-slate-950 font-black text-lg flex items-center justify-center">
               {(currentUser?.name || 'U').split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase()}
             </div>
-            <div>
+            <div className="min-w-0">
               <h2 className="text-base font-extrabold text-white">Guest Profile & My Bookings</h2>
-              <p className="text-xs text-slate-300">{currentUser?.name} • {currentUser?.email}</p>
+              <p className="text-xs text-slate-300 truncate">{currentUser?.name} • {currentUser?.email}</p>
             </div>
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center font-bold text-slate-300">
@@ -77,8 +115,8 @@ export default function UserAccountModal({ onClose, currentUser, userBookings, o
         </div>
 
         {/* Tabs */}
-        <div className="px-6 bg-slate-50 border-b border-slate-200 flex gap-6 text-xs font-bold text-slate-600">
-          <button 
+        <div className="px-4 sm:px-6 bg-slate-50 border-b border-slate-200 flex gap-6 text-xs font-bold text-slate-600 shrink-0 overflow-x-auto">
+          <button
             onClick={() => setActiveTab('bookings')}
             className={`py-3 border-b-2 transition ${activeTab === 'bookings' ? 'border-[#D4AF37] text-slate-950' : 'border-transparent hover:text-slate-900'}`}
           >
@@ -93,15 +131,37 @@ export default function UserAccountModal({ onClose, currentUser, userBookings, o
         </div>
 
         {/* Modal Body */}
-        <div className="p-6">
+        <div className="p-4 sm:p-6 flex-1 min-h-0 overflow-y-auto overscroll-contain">
           
           {cancellationResult && (
-            <div className="mb-6 bg-rose-50 border border-rose-200 p-4 rounded-2xl text-xs text-rose-900 font-medium flex justify-between items-center">
+            <div className="mb-6 bg-emerald-50 border border-emerald-200 p-4 rounded-2xl text-xs text-emerald-900 font-medium flex justify-between items-center">
               <div>
-                <p className="font-extrabold text-sm">Booking {cancellationResult.booking_id} Cancelled</p>
-                <p className="mt-0.5">Refund of <strong>₹{cancellationResult.refund_amount?.toLocaleString('en-IN')}</strong> will be credited to original payment source within 3-5 business days.</p>
+                <p className="font-extrabold text-sm">Booking {cancellationResult.booking_id} cancelled</p>
+                <p className="mt-1">Cancellation fee (10%): <strong>₹{Number(cancellationResult.cancellation_fee || 0).toLocaleString('en-IN')}</strong></p>
+                {Number(cancellationResult.refund_amount || 0) > 0 ? (
+                  <>
+                    <p>Refund to you (90%): <strong>₹{Number(cancellationResult.refund_amount).toLocaleString('en-IN')}</strong></p>
+                    <p className="mt-1 text-emerald-800">
+                      Your refund will be credited within <strong>2 to 5 working days</strong> on your original payment method.
+                    </p>
+                  </>
+                ) : (
+                  <p className="mt-1">No refund is due for this booking.</p>
+                )}
+                <p className="mt-1">Refund status: <strong>{cancellationResult.refund_status === 'PENDING' ? 'REFUND IN PROGRESS' : cancellationResult.refund_status?.replaceAll('_', ' ')}</strong></p>
+                {cancellationResult.email_notifications?.guest
+                  ? <p className="mt-1">A cancellation confirmation was emailed to you.</p>
+                  : cancellationResult.email_notifications
+                    ? <p className="mt-1 text-amber-800">Cancellation confirmed, but the email could not be sent. Please contact support if needed.</p>
+                    : <p className="mt-1">This cancellation is already recorded.</p>}
               </div>
-              <button onClick={() => setCancellationResult(null)} className="text-rose-600 font-bold underline">Dismiss</button>
+              <button onClick={() => setCancellationResult(null)} className="text-emerald-700 font-bold underline">Dismiss</button>
+            </div>
+          )}
+
+          {cancellationError && (
+            <div role="alert" className="mb-4 bg-rose-50 border border-rose-200 p-3 rounded-xl text-xs text-rose-800 font-semibold">
+              {cancellationError}
             </div>
           )}
 
@@ -170,13 +230,15 @@ export default function UserAccountModal({ onClose, currentUser, userBookings, o
                           </>
                         )}
                       </button>
-                      <button 
-                        onClick={() => handleCancelRequest(b.booking_id)}
-                        disabled={cancellingId === b.booking_id}
-                        className="bg-rose-50 text-rose-600 hover:bg-rose-100 text-xs font-bold px-3 py-1.5 rounded-lg transition"
-                      >
-                        {cancellingId === b.booking_id ? 'Cancelling...' : 'Cancel Booking'}
-                      </button>
+                      {['PENDING', 'CONFIRMED'].includes(b.status) && (
+                        <button
+                          onClick={() => handleCancelRequest(b.booking_id)}
+                          disabled={cancellingId === b.booking_id}
+                          className="bg-rose-50 text-rose-600 hover:bg-rose-100 text-xs font-bold px-3 py-1.5 rounded-lg transition disabled:opacity-60"
+                        >
+                          {cancellingId === b.booking_id ? 'Cancelling...' : 'Cancel Booking'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))
@@ -194,7 +256,8 @@ export default function UserAccountModal({ onClose, currentUser, userBookings, o
                   <div key={idx} className="bg-slate-50 rounded-xl p-4 border border-slate-200 text-xs flex justify-between items-center opacity-80">
                     <div>
                       <p className="font-bold text-slate-900">{b.hotel_name || 'Taj Exotica'}</p>
-                      <p className="text-[11px] text-slate-500">ID: {b.booking_id} • Refund Processed</p>
+                      <p className="text-[11px] text-slate-500">ID: {b.booking_id} • Refund: ₹{Number(b.refund_amount || 0).toLocaleString('en-IN')} · {b.refund_status?.replaceAll('_', ' ') || 'NOT APPLICABLE'}</p>
+                      <p className="text-[11px] text-slate-500">Cancellation fee: ₹{Number(b.cancellation_fee || 0).toLocaleString('en-IN')}</p>
                     </div>
                     <span className="bg-rose-100 text-rose-800 text-[10px] font-bold px-2 py-0.5 rounded">CANCELLED</span>
                   </div>

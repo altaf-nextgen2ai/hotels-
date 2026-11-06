@@ -1,10 +1,117 @@
 import React, { useState } from 'react';
-import { 
-  Building2, ShieldCheck, TrendingUp, Users, CheckCircle, Clock, 
-  ArrowRight, Phone, Mail, User, Lock, MapPin, Hotel, Sparkles, Check 
+import {
+  Building2,
+  ShieldCheck,
+  Clock,
+  Phone,
+  Mail,
+  User,
+  Lock,
+  MapPin,
+  Hotel,
+  BadgeCheck,
+  Headset,
+  Wallet,
+  LayoutDashboard,
+  ArrowRight,
+  ChevronRight,
 } from 'lucide-react';
 import { apiService } from '../services/api';
 import Logo from './Logo';
+
+const SUPPORT_PHONE = '+91 8447151225';
+const OFFICE_ADDRESS = 'Deevika Tower, Chandan Nagar, Ghaziabad';
+
+const STEPS = [
+  { step: '01', title: 'Submit application', detail: 'Share property and owner details in under 5 minutes.' },
+  { step: '02', title: 'Verification', detail: 'Our team reviews your listing and confirms commission terms.' },
+  { step: '03', title: 'Go live', detail: 'Access the partner dashboard to manage rooms, rates, and bookings.' },
+];
+
+const BENEFITS = [
+  {
+    icon: Wallet,
+    title: '90% direct payout',
+    detail: 'Flat 10% platform fee on confirmed bookings — transparent and predictable.',
+  },
+  {
+    icon: LayoutDashboard,
+    title: 'Partner dashboard',
+    detail: 'Control inventory, pricing, photos, and booking status from one portal.',
+  },
+  {
+    icon: BadgeCheck,
+    title: 'Verified demand',
+    detail: 'Reach travellers searching on TRUMITRIP with secure payment collection.',
+  },
+  {
+    icon: Headset,
+    title: 'Dedicated support',
+    detail: 'Partner onboarding and account help via phone and email.',
+  },
+];
+
+function PartnerTopBar({ onNavigateView }) {
+  return (
+    <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0A192F]/95 backdrop-blur-md">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-10">
+        <button type="button" onClick={() => onNavigateView('customer')} className="text-left shrink-0">
+          <Logo size="medium" />
+        </button>
+        <nav className="flex items-center gap-2 sm:gap-4">
+          <button
+            type="button"
+            onClick={() => onNavigateView('customer')}
+            className="hidden text-xs font-semibold text-slate-300 hover:text-white sm:inline"
+          >
+            Back to TRUMITRIP
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigateView('vendor-login')}
+            className="rounded-lg border border-[#D4AF37]/40 bg-[#D4AF37]/10 px-3 py-2 text-xs font-bold text-[#F3E5AB] transition hover:bg-[#D4AF37]/20 sm:px-4"
+          >
+            Partner login
+          </button>
+        </nav>
+      </div>
+    </header>
+  );
+}
+
+function PartnerSupportStrip() {
+  return (
+    <section className="border-t border-slate-200 bg-white">
+      <div className="mx-auto grid max-w-7xl gap-6 px-4 py-10 sm:px-6 lg:grid-cols-3 lg:px-10">
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-wider text-[#B8860B]">Partner support</p>
+          <p className="mt-2 text-sm font-bold text-slate-900">Questions before you apply?</p>
+          <p className="mt-1 text-sm text-slate-600">Our team helps with onboarding, pricing, and listing setup.</p>
+        </div>
+        <a
+          href="tel:+918447151225"
+          className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 transition hover:border-[#D4AF37]/50"
+        >
+          <Phone className="mt-0.5 h-5 w-5 shrink-0 text-[#B8860B]" />
+          <div>
+            <p className="text-xs font-bold text-slate-500">Call us</p>
+            <p className="text-sm font-extrabold text-slate-900">{SUPPORT_PHONE}</p>
+          </div>
+        </a>
+        <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-[#B8860B]" />
+          <div>
+            <p className="text-xs font-bold text-slate-500">Registered office</p>
+            <p className="text-sm font-semibold leading-relaxed text-slate-800">{OFFICE_ADDRESS}</p>
+            <a href="mailto:info@trumitrip.com" className="mt-1 inline-block text-xs font-bold text-[#0A192F] underline">
+              info@trumitrip.com
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export default function BecomePartnerPage({ currentUser, onLoginSuccess, onNavigateView, onLogout }) {
   const [formData, setFormData] = useState({
@@ -15,18 +122,22 @@ export default function BecomePartnerPage({ currentUser, onLoginSuccess, onNavig
     hotel_name: '',
     city: 'Goa',
     address: '',
-    total_rooms: '15'
+    total_rooms: '15',
   });
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [submittedVendor, setSubmittedVendor] = useState(null);
+  const [agreedTerms, setAgreedTerms] = useState(false);
 
-  // If user is already a VENDOR with PENDING status
   const isPendingVendor = currentUser?.role === 'VENDOR' && currentUser?.vendor_status === 'PENDING';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!agreedTerms) {
+      setErrorMsg('Please accept the partner terms to continue.');
+      return;
+    }
     if (!formData.name || !formData.email || !formData.password || !formData.hotel_name) {
       setErrorMsg('Full Name, Email, Password, and Hotel Name are required.');
       return;
@@ -42,7 +153,8 @@ export default function BecomePartnerPage({ currentUser, onLoginSuccess, onNavig
       password: formData.password,
       hotel_name: formData.hotel_name,
       city: formData.city,
-      address: formData.address
+      address: formData.address,
+      total_rooms: formData.total_rooms,
     });
 
     setLoading(false);
@@ -56,356 +168,367 @@ export default function BecomePartnerPage({ currentUser, onLoginSuccess, onNavig
         phone: formData.phone,
         role: 'VENDOR',
         vendor_status: 'PENDING',
-        hotel_name: formData.hotel_name
+        hotel_name: formData.hotel_name,
       };
       setSubmittedVendor(vendorObj);
       if (onLoginSuccess && res.vendor) {
-        onLoginSuccess({ ...res.vendor, role: 'VENDOR', vendor_status: 'PENDING' });
+        onLoginSuccess({ ...res.vendor, role: 'VENDOR', vendor_status: 'PENDING' }, res.token);
       }
     }
   };
 
-  // Status Screen for Pending Approval
   if (isPendingVendor || submittedVendor) {
     const activeUser = submittedVendor || currentUser;
     return (
-      <div className="min-h-screen bg-[#0A192F] text-slate-100 flex flex-col justify-between p-4 md:p-12 relative overflow-hidden">
-        {/* Decorative Background Effects */}
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="flex min-h-screen flex-col bg-slate-100">
+        <PartnerTopBar onNavigateView={onNavigateView} />
+        <main className="flex flex-1 items-center justify-center px-4 py-12 sm:px-6">
+          <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-8 shadow-xl shadow-slate-200/60">
+            <div className="text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 ring-1 ring-amber-200">
+                <Clock className="h-7 w-7" />
+              </div>
+              <p className="mt-4 text-[11px] font-black uppercase tracking-wider text-amber-700">Under review</p>
+              <h1 className="mt-2 text-2xl font-black text-slate-900">Application received</h1>
+              <p className="mt-3 text-sm leading-relaxed text-slate-600">
+                We are reviewing{' '}
+                <strong className="text-slate-900">{activeUser?.hotel_name || formData.hotel_name || 'your property'}</strong>.
+                You will get dashboard access once an administrator approves your partner account.
+              </p>
+            </div>
 
-        {/* Top Navbar */}
-        <div className="max-w-6xl w-full mx-auto flex justify-between items-center z-10">
-          <div onClick={() => onNavigateView('customer')} className="cursor-pointer">
-            <Logo size="medium" />
+            <dl className="mt-8 space-y-3 rounded-2xl bg-slate-50 p-5 text-sm">
+              {[
+                ['Applicant', activeUser?.name],
+                ['Email', activeUser?.email],
+                ['Property', activeUser?.hotel_name || formData.hotel_name],
+                ['Commission', '10% platform fee · 90% payout'],
+              ].map(([label, value]) => (
+                <div key={label} className="flex justify-between gap-4 border-b border-slate-200/80 pb-3 last:border-0 last:pb-0">
+                  <dt className="font-medium text-slate-500">{label}</dt>
+                  <dd className="text-right font-bold text-slate-900">{value}</dd>
+                </div>
+              ))}
+              <div className="flex justify-between gap-4 pt-1">
+                <dt className="font-medium text-slate-500">Status</dt>
+                <dd>
+                  <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-black uppercase text-amber-800">
+                    Pending approval
+                  </span>
+                </dd>
+              </div>
+            </dl>
+
+            <div className="mt-6 flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 text-xs leading-relaxed text-slate-600">
+              <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-600" />
+              After approval, sign in with your partner credentials to open the Hotel Partner Dashboard.
+            </div>
+
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => onNavigateView('customer')}
+                className="flex-1 rounded-xl bg-[#0A192F] py-3.5 text-xs font-black text-[#D4AF37] transition hover:brightness-110"
+              >
+                Return to TRUMITRIP
+              </button>
+              <button
+                type="button"
+                onClick={onLogout}
+                className="rounded-xl border border-slate-300 px-5 py-3.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Sign out
+              </button>
+            </div>
           </div>
-          <button 
-            onClick={() => onNavigateView('customer')}
-            className="text-xs font-bold text-slate-400 hover:text-white transition cursor-pointer"
-          >
-            ← Back to Customer Site
-          </button>
-        </div>
-
-        {/* Main Status Container */}
-        <div className="max-w-2xl w-full mx-auto my-auto bg-slate-900/90 border border-slate-800 rounded-3xl p-6 md:p-10 shadow-2xl backdrop-blur-xl z-10 space-y-6 animate-in fade-in zoom-in-95">
-          <div className="text-center space-y-3">
-            <div className="w-16 h-16 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-amber-500/10">
-              <Clock className="w-8 h-8 animate-pulse" />
-            </div>
-            <span className="inline-block bg-amber-500/20 text-amber-300 text-[11px] font-black px-3.5 py-1 rounded-full uppercase tracking-wider border border-amber-500/30">
-              Application Under Review
-            </span>
-            <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">
-              Hotel Partner Registration Received!
-            </h1>
-            <p className="text-xs md:text-sm text-slate-300 max-w-lg mx-auto leading-relaxed">
-              Thank you for applying to list <strong className="text-amber-400">{activeUser?.hotel_name || formData.hotel_name || 'your property'}</strong> on TRUMITRIP. Our executive team is reviewing your registration details.
-            </p>
-          </div>
-
-          {/* Details Card */}
-          <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-5 text-xs space-y-3">
-            <div className="flex justify-between items-center pb-2.5 border-b border-slate-800">
-              <span className="text-slate-400 font-medium">Applicant Name</span>
-              <span className="font-bold text-white">{activeUser?.name}</span>
-            </div>
-            <div className="flex justify-between items-center pb-2.5 border-b border-slate-800">
-              <span className="text-slate-400 font-medium">Registered Email</span>
-              <span className="font-bold text-emerald-400">{activeUser?.email}</span>
-            </div>
-            <div className="flex justify-between items-center pb-2.5 border-b border-slate-800">
-              <span className="text-slate-400 font-medium">Property Name</span>
-              <span className="font-bold text-amber-400">{activeUser?.hotel_name || formData.hotel_name || 'Pending Details'}</span>
-            </div>
-            <div className="flex justify-between items-center pb-2.5 border-b border-slate-800">
-              <span className="text-slate-400 font-medium">Commission Rate</span>
-              <span className="font-bold text-emerald-400">10% Platform Fee (90% Payout)</span>
-            </div>
-            <div className="flex justify-between items-center pt-1">
-              <span className="text-slate-400 font-medium">Approval Status</span>
-              <span className="bg-amber-500/20 text-amber-300 font-black px-2.5 py-0.5 rounded text-[10px] uppercase border border-amber-500/30">
-                PENDING ADMIN APPROVAL
-              </span>
-            </div>
-          </div>
-
-          <div className="bg-slate-800/60 p-4 rounded-2xl border border-slate-700/60 flex items-start gap-3">
-            <ShieldCheck className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-            <p className="text-[11px] text-slate-300 leading-relaxed">
-              Once approved by Administrator, logging into your account will automatically open your full <strong>Hotel Partner App Dashboard</strong> with access to Rooms, Pricing, Inventory & Revenue.
-            </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-3 pt-2">
-            <button 
-              onClick={() => onNavigateView('customer')}
-              className="flex-1 bg-gradient-to-r from-[#D4AF37] to-[#B8860B] text-slate-950 font-black text-xs py-3.5 rounded-xl hover:brightness-110 shadow-lg transition cursor-pointer"
-            >
-              Explore TRUMITRIP Site
-            </button>
-            <button 
-              onClick={onLogout}
-              className="px-5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs py-3.5 rounded-xl transition cursor-pointer"
-            >
-              Sign Out Account
-            </button>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="text-center text-[11px] text-slate-500 z-10 mt-6">
-          Need partner support? Contact us at <a href="mailto:partner@trumitrip.com" className="text-amber-400 underline">partner@trumitrip.com</a>
-        </div>
+        </main>
+        <PartnerSupportStrip />
       </div>
     );
   }
 
-  // Registration Form View
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
-      {/* Navbar Header */}
-      <header className="border-b border-slate-800 bg-slate-900/80 sticky top-0 z-40 backdrop-blur-md px-6 py-4">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div onClick={() => onNavigateView('customer')} className="cursor-pointer">
-            <Logo size="medium" />
-          </div>
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={() => onNavigateView('customer')}
-              className="text-xs font-bold text-slate-400 hover:text-white transition cursor-pointer"
-            >
-              Customer Site
-            </button>
-            <button 
-              onClick={() => onNavigateView('partner')}
-              className="bg-[#D4AF37] text-slate-950 font-black text-xs px-4 py-2 rounded-xl hover:bg-amber-400 transition shadow cursor-pointer"
-            >
-              Partner Login
-            </button>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen bg-slate-100 text-slate-900">
+      <PartnerTopBar onNavigateView={onNavigateView} />
 
-      {/* Hero Banner */}
-      <section className="py-12 md:py-16 px-6 relative overflow-hidden bg-gradient-to-b from-[#0A192F] to-slate-950">
-        <div className="max-w-5xl mx-auto text-center space-y-4">
-          <span className="bg-[#D4AF37]/10 text-[#D4AF37] text-xs font-black px-4 py-1.5 rounded-full uppercase tracking-wider border border-[#D4AF37]/30 inline-flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5" />
-            Join TRUMITRIP Hotel Partner Network
-          </span>
-          <h1 className="text-3xl md:text-5xl font-black text-white tracking-tight leading-tight">
-            Grow Your Hotel Business & Maximize <span className="text-[#D4AF37]">Direct Revenue</span>
-          </h1>
-          <p className="text-slate-300 text-sm md:text-base max-w-2xl mx-auto leading-relaxed">
-            Register your hotel or resort in minutes. Gain access to thousands of luxury travelers with low 10% commission and 90% direct payouts.
-          </p>
+      {/* Hero */}
+      <section className="relative overflow-hidden bg-[#0A192F] text-white">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.07]"
+          style={{
+            backgroundImage:
+              'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)',
+            backgroundSize: '48px 48px',
+          }}
+        />
+        <div className="pointer-events-none absolute -right-32 top-0 h-96 w-96 rounded-full bg-[#D4AF37]/10 blur-3xl" />
+        <div className="relative mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:flex lg:items-center lg:gap-16 lg:px-10 lg:py-20">
+          <div className="lg:flex-1">
+            <p className="text-[11px] font-black uppercase tracking-[0.2em] text-[#D4AF37]">Hotel partner program</p>
+            <h1 className="mt-3 text-3xl font-black leading-tight tracking-tight sm:text-4xl lg:text-[2.75rem]">
+              List your property on TRUMITRIP and grow direct bookings
+            </h1>
+            <p className="mt-4 max-w-xl text-sm leading-relaxed text-slate-300 sm:text-base">
+              A professional onboarding flow for hotels and resorts — transparent commission, secure payouts, and a
+              dedicated partner dashboard after approval.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <a
+                href="#partner-application"
+                className="inline-flex items-center gap-2 rounded-xl bg-[#D4AF37] px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-[#E5C158]"
+              >
+                Start application <ArrowRight className="h-4 w-4" />
+              </a>
+              <button
+                type="button"
+                onClick={() => onNavigateView('vendor-login')}
+                className="inline-flex items-center gap-2 rounded-xl border border-white/20 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/10"
+              >
+                Already registered? Sign in
+              </button>
+            </div>
+          </div>
+          <div className="mt-10 grid grid-cols-2 gap-3 sm:gap-4 lg:mt-0 lg:w-[340px] lg:shrink-0">
+            {[
+              { value: '90%', label: 'Partner payout on each booking' },
+              { value: '10%', label: 'Flat platform commission' },
+              { value: '24/7', label: 'Listing & booking support' },
+              { value: 'Free', label: 'Partner registration' },
+            ].map((stat) => (
+              <div
+                key={stat.label}
+                className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm"
+              >
+                <p className="text-2xl font-black text-[#F3E5AB]">{stat.value}</p>
+                <p className="mt-1 text-[11px] font-medium leading-snug text-slate-400">{stat.label}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
-      {/* Main Registration Grid */}
-      <section className="max-w-6xl mx-auto px-6 pb-20 grid grid-cols-1 lg:grid-cols-12 gap-12 items-start">
-        
-        {/* Left Benefits Column */}
-        <div className="lg:col-span-5 space-y-6 pt-4">
-          <h2 className="text-xl font-black text-white">Why Partner with TRUMITRIP?</h2>
-          
-          <div className="space-y-4">
-            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex gap-4 items-start">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold shrink-0">
-                90%
+      {/* How it works */}
+      <section className="border-b border-slate-200 bg-white">
+        <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-10">
+          <h2 className="text-center text-lg font-black text-slate-900 sm:text-xl">How onboarding works</h2>
+          <div className="mt-8 grid gap-6 md:grid-cols-3">
+            {STEPS.map((item, index) => (
+              <div key={item.step} className="relative rounded-2xl border border-slate-200 bg-slate-50 p-6">
+                {index < STEPS.length - 1 && (
+                  <ChevronRight className="absolute -right-3 top-1/2 hidden h-5 w-5 -translate-y-1/2 text-slate-300 md:block" />
+                )}
+                <p className="text-xs font-black text-[#B8860B]">{item.step}</p>
+                <h3 className="mt-2 font-extrabold text-slate-900">{item.title}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-slate-600">{item.detail}</p>
               </div>
-              <div>
-                <h3 className="font-extrabold text-white text-sm">Industry Best 90% Payout</h3>
-                <p className="text-xs text-slate-400 mt-1">We charge a flat 10% platform fee. You keep 90% of every confirmed booking revenue.</p>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex gap-4 items-start">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center font-bold shrink-0">
-                <Building2 className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-white text-sm">Dedicated Hotel Partner App</h3>
-                <p className="text-xs text-slate-400 mt-1">Manage rooms, pricing, availability, and guest bookings from a single sleek dashboard.</p>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex gap-4 items-start">
-              <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center font-bold shrink-0">
-                <ShieldCheck className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-white text-sm">Verified Guests & Instant Alerts</h3>
-                <p className="text-xs text-slate-400 mt-1">Receive verified bookings with instant notification and real-time status management.</p>
-              </div>
-            </div>
+            ))}
           </div>
         </div>
-
-        {/* Right Partner Application Form */}
-        <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl">
-          <div className="border-b border-slate-800 pb-4 mb-6">
-            <h2 className="text-xl font-black text-white flex items-center gap-2">
-              <Hotel className="w-5 h-5 text-[#D4AF37]" />
-              <span>Hotel Partner Application</span>
-            </h2>
-            <p className="text-xs text-slate-400 mt-1">Fill out your owner details and hotel information to register.</p>
-          </div>
-
-          {errorMsg && (
-            <div className="mb-6 p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-bold">
-              {errorMsg}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            
-            {/* Owner Credentials */}
-            <div className="space-y-3">
-              <span className="text-[10px] font-black text-[#D4AF37] uppercase tracking-wider block">1. Owner / Manager Account</span>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Full Name *</label>
-                  <div className="flex items-center gap-2 p-3 bg-slate-950 border border-slate-800 rounded-xl focus-within:border-[#D4AF37]">
-                    <User className="w-4 h-4 text-slate-500" />
-                    <input 
-                      type="text" 
-                      required 
-                      value={formData.name} 
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })} 
-                      placeholder="e.g. Ramesh Sharma" 
-                      className="w-full bg-transparent text-xs font-bold text-white focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Email Address *</label>
-                  <div className="flex items-center gap-2 p-3 bg-slate-950 border border-slate-800 rounded-xl focus-within:border-[#D4AF37]">
-                    <Mail className="w-4 h-4 text-slate-500" />
-                    <input 
-                      type="email" 
-                      required 
-                      value={formData.email} 
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })} 
-                      placeholder="owner@hotelname.com" 
-                      className="w-full bg-transparent text-xs font-bold text-white focus:outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Mobile Phone *</label>
-                  <div className="flex items-center gap-2 p-3 bg-slate-950 border border-slate-800 rounded-xl focus-within:border-[#D4AF37]">
-                    <Phone className="w-4 h-4 text-slate-500" />
-                    <input 
-                      type="tel" 
-                      required 
-                      value={formData.phone} 
-                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })} 
-                      placeholder="+91 9876543210" 
-                      className="w-full bg-transparent text-xs font-bold text-white focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Create Password *</label>
-                  <div className="flex items-center gap-2 p-3 bg-slate-950 border border-slate-800 rounded-xl focus-within:border-[#D4AF37]">
-                    <Lock className="w-4 h-4 text-slate-500" />
-                    <input 
-                      type="password" 
-                      required 
-                      value={formData.password} 
-                      onChange={(e) => setFormData({ ...formData, password: e.target.value })} 
-                      placeholder="Strong password" 
-                      className="w-full bg-transparent text-xs font-bold text-white focus:outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Property Information */}
-            <div className="space-y-3 pt-4 border-t border-slate-800">
-              <span className="text-[10px] font-black text-[#D4AF37] uppercase tracking-wider block">2. Property & Business Details</span>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Hotel / Property Name *</label>
-                <div className="flex items-center gap-2 p-3 bg-slate-950 border border-slate-800 rounded-xl focus-within:border-[#D4AF37]">
-                  <Building2 className="w-4 h-4 text-slate-500" />
-                  <input 
-                    type="text" 
-                    required 
-                    value={formData.hotel_name} 
-                    onChange={(e) => setFormData({ ...formData, hotel_name: e.target.value })} 
-                    placeholder="e.g. Grand Heritage Palace & Spa" 
-                    className="w-full bg-transparent text-xs font-bold text-white focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">City / Region *</label>
-                  <input 
-                    type="text"
-                    required
-                    list="partner-city-suggestions"
-                    value={formData.city} 
-                    onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                    placeholder="e.g. Udaipur, Goa, Shimla, Dubai"
-                    className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-[#D4AF37]"
-                  />
-                  <datalist id="partner-city-suggestions">
-                    {["Goa", "Mumbai", "Delhi", "Manali", "Jaipur", "Dubai", "Paris", "Singapore", "Bengaluru", "Udaipur", "Shimla", "Agra", "Kolkata", "Kochi", "Varanasi"].map(c => (
-                      <option key={c} value={c} />
-                    ))}
-                  </datalist>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Total Room Capacity</label>
-                  <input 
-                    type="number" 
-                    min="1" 
-                    value={formData.total_rooms} 
-                    onChange={(e) => setFormData({ ...formData, total_rooms: e.target.value })}
-                    className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Property Address</label>
-                <div className="flex items-start gap-2 p-3 bg-slate-950 border border-slate-800 rounded-xl focus-within:border-[#D4AF37]">
-                  <MapPin className="w-4 h-4 text-slate-500 mt-0.5 shrink-0" />
-                  <textarea 
-                    rows="2" 
-                    value={formData.address} 
-                    onChange={(e) => setFormData({ ...formData, address: e.target.value })} 
-                    placeholder="Full postal address of the property..." 
-                    className="w-full bg-transparent text-xs font-bold text-white focus:outline-none resize-none"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <button 
-              type="submit" 
-              disabled={loading}
-              className="w-full mt-4 bg-gradient-to-r from-[#D4AF37] via-[#E5C158] to-[#B8860B] text-slate-950 font-black text-sm py-4 rounded-xl hover:brightness-110 shadow-xl transition flex items-center justify-center gap-2 cursor-pointer"
-            >
-              {loading ? 'Submitting Application...' : 'Submit Partner Application →'}
-            </button>
-          </form>
-        </div>
-
       </section>
+
+      {/* Benefits + Form */}
+      <section className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-10 lg:py-16">
+        <div className="grid gap-10 lg:grid-cols-12 lg:gap-12">
+          <div className="lg:col-span-5">
+            <h2 className="text-xl font-black text-slate-900">Why partner with us</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Built for property owners who want clarity on fees, control over inventory, and reliable traveller demand.
+            </p>
+            <ul className="mt-8 space-y-4">
+              {BENEFITS.map(({ icon: Icon, title, detail }) => (
+                <li key={title} className="flex gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#0A192F] text-[#D4AF37]">
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">{title}</h3>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-600">{detail}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div id="partner-application" className="lg:col-span-7 scroll-mt-24">
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/50 sm:p-8">
+              <div className="border-b border-slate-100 pb-5">
+                <div className="flex items-center gap-2">
+                  <Hotel className="h-5 w-5 text-[#B8860B]" />
+                  <h2 className="text-xl font-black text-slate-900">Partner application</h2>
+                </div>
+                <p className="mt-2 text-sm text-slate-600">
+                  Complete both sections below. Fields marked with * are required.
+                </p>
+              </div>
+
+              {errorMsg && (
+                <div className="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800">
+                  {errorMsg}
+                </div>
+              )}
+
+              <form onSubmit={handleSubmit} className="mt-6 space-y-8">
+                <fieldset className="space-y-4">
+                  <legend className="text-[11px] font-black uppercase tracking-wider text-[#B8860B]">
+                    Account holder
+                  </legend>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-bold text-slate-700">Full name *</span>
+                      <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 focus-within:border-[#D4AF37] focus-within:ring-2 focus-within:ring-[#D4AF37]/20">
+                        <User className="h-4 w-4 text-slate-400" />
+                        <input
+                          type="text"
+                          required
+                          value={formData.name}
+                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                          placeholder="Owner or manager name"
+                          className="w-full bg-transparent text-sm font-medium text-slate-900 outline-none"
+                        />
+                      </div>
+                    </label>
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-bold text-slate-700">Work email *</span>
+                      <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 focus-within:border-[#D4AF37] focus-within:ring-2 focus-within:ring-[#D4AF37]/20">
+                        <Mail className="h-4 w-4 text-slate-400" />
+                        <input
+                          type="email"
+                          required
+                          value={formData.email}
+                          onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                          placeholder="owner@property.com"
+                          className="w-full bg-transparent text-sm font-medium text-slate-900 outline-none"
+                        />
+                      </div>
+                    </label>
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-bold text-slate-700">Mobile *</span>
+                      <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 focus-within:border-[#D4AF37] focus-within:ring-2 focus-within:ring-[#D4AF37]/20">
+                        <Phone className="h-4 w-4 text-slate-400" />
+                        <input
+                          type="tel"
+                          required
+                          value={formData.phone}
+                          onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                          placeholder="+91 8447151225"
+                          className="w-full bg-transparent text-sm font-medium text-slate-900 outline-none"
+                        />
+                      </div>
+                    </label>
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-bold text-slate-700">Password *</span>
+                      <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 focus-within:border-[#D4AF37] focus-within:ring-2 focus-within:ring-[#D4AF37]/20">
+                        <Lock className="h-4 w-4 text-slate-400" />
+                        <input
+                          type="password"
+                          required
+                          value={formData.password}
+                          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                          placeholder="Minimum 8 characters"
+                          className="w-full bg-transparent text-sm font-medium text-slate-900 outline-none"
+                        />
+                      </div>
+                    </label>
+                  </div>
+                </fieldset>
+
+                <fieldset className="space-y-4 border-t border-slate-100 pt-6">
+                  <legend className="text-[11px] font-black uppercase tracking-wider text-[#B8860B]">
+                    Property details
+                  </legend>
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-bold text-slate-700">Hotel / property name *</span>
+                    <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 focus-within:border-[#D4AF37] focus-within:ring-2 focus-within:ring-[#D4AF37]/20">
+                      <Building2 className="h-4 w-4 text-slate-400" />
+                      <input
+                        type="text"
+                        required
+                        value={formData.hotel_name}
+                        onChange={(e) => setFormData({ ...formData, hotel_name: e.target.value })}
+                        placeholder="Registered property name"
+                        className="w-full bg-transparent text-sm font-medium text-slate-900 outline-none"
+                      />
+                    </div>
+                  </label>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-bold text-slate-700">City / region *</span>
+                      <input
+                        type="text"
+                        required
+                        list="partner-city-suggestions"
+                        value={formData.city}
+                        onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                        placeholder="City"
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-900 outline-none focus:border-[#D4AF37] focus:ring-2 focus:ring-[#D4AF37]/20"
+                      />
+                      <datalist id="partner-city-suggestions">
+                        {['Goa', 'Mumbai', 'Delhi', 'Manali', 'Jaipur', 'Dubai', 'Paris', 'Singapore', 'Lansdowne', 'Ghaziabad'].map(
+                          (c) => (
+                            <option key={c} value={c} />
+                          ),
+                        )}
+                      </datalist>
+                    </label>
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-bold text-slate-700">Room count *</span>
+                      <input
+                        type="number"
+                        min="1"
+                        required
+                        value={formData.total_rooms}
+                        onChange={(e) => setFormData({ ...formData, total_rooms: e.target.value })}
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-900 outline-none focus:border-[#D4AF37] focus:ring-2 focus:ring-[#D4AF37]/20"
+                      />
+                    </label>
+                  </div>
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-bold text-slate-700">Full address</span>
+                    <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 focus-within:border-[#D4AF37] focus-within:ring-2 focus-within:ring-[#D4AF37]/20">
+                      <MapPin className="mt-1 h-4 w-4 shrink-0 text-slate-400" />
+                      <textarea
+                        rows={3}
+                        value={formData.address}
+                        onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                        placeholder="Street, area, PIN code"
+                        className="w-full resize-none bg-transparent text-sm font-medium text-slate-900 outline-none"
+                      />
+                    </div>
+                  </label>
+                </fieldset>
+
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <input
+                    type="checkbox"
+                    checked={agreedTerms}
+                    onChange={(e) => setAgreedTerms(e.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-slate-300 text-[#0A192F] focus:ring-[#D4AF37]"
+                  />
+                  <span className="text-xs leading-relaxed text-slate-600">
+                    I confirm the information is accurate and agree to TRUMITRIP partner terms, including the{' '}
+                    <strong className="text-slate-900">10% platform fee</strong> and admin verification before listing goes live.
+                  </span>
+                </label>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0A192F] py-4 text-sm font-black text-[#D4AF37] transition hover:brightness-110 disabled:opacity-60"
+                >
+                  {loading ? 'Submitting…' : 'Submit partner application'}
+                  {!loading && <ArrowRight className="h-4 w-4" />}
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <PartnerSupportStrip />
+
+      <footer className="border-t border-slate-200 bg-slate-50 py-6 text-center text-xs text-slate-500">
+        © {new Date().getFullYear()} TRUMITRIP · Hotel Partner Program
+      </footer>
     </div>
   );
 }

@@ -1,10 +1,10 @@
 from django.urls import path
 from .views import (
     HotelListView, HotelDetailView, BookingListCreateView, 
-    BookingCancelView, ValidateCouponView, AdminAnalyticsView, 
-    AdminHotelManageView, AdminVendorManageView, AdminBookingManageView,
-    AdminCouponManageView, PartnerRatesView, PartnerRoomManageView,
-    PartnerBookingStatusView, PartnerAnalyticsView, AdminPayoutsView,
+    BookingCancelView, ValidateCouponView, ActiveCouponListView, AdminAnalyticsView,
+    AdminHotelManageView, AdminVendorManageView, AdminBookingManageView, AdminManualRefundView,
+    AdminCouponManageView,     PartnerRatesView, PartnerRoomManageView,
+    PartnerBookingStatusView, PartnerAnalyticsView, AdminPayoutsView, PartnerHotelRegisterView, PartnerHotelDetailView,
     SignupView, VerifySignupView, LoginView, CreateVendorView, ListVendorsView, AdminVendorStatusView,
     RazorpayCreateOrderView, RazorpayVerifyPaymentView, AdminCommissionSettingsView,
     GoogleAuthView, BookingVoucherView, AdminResendVoucherView,
@@ -28,6 +28,7 @@ urlpatterns = [
     path('admin/hotels/<int:pk>/', AdminHotelManageView.as_view(), name='admin-hotel-update-delete'),
     path('admin/bookings/', AdminBookingManageView.as_view(), name='admin-booking-list'),
     path('admin/bookings/<str:booking_id>/', AdminBookingManageView.as_view(), name='admin-booking-update'),
+    path('admin/bookings/<str:booking_id>/refund/', AdminManualRefundView.as_view(), name='admin-manual-refund'),
     path('admin/coupons/', AdminCouponManageView.as_view(), name='admin-coupon-list-create'),
     path('admin/coupons/<int:pk>/', AdminCouponManageView.as_view(), name='admin-coupon-update-delete'),
     path('admin/payouts/', AdminPayoutsView.as_view(), name='admin-payouts'),
@@ -39,8 +40,11 @@ urlpatterns = [
     path('bookings/', BookingListCreateView.as_view(), name='booking-list-create'),
     path('bookings/<str:booking_id>/cancel/', BookingCancelView.as_view(), name='booking-cancel'),
     path('coupons/validate/', ValidateCouponView.as_view(), name='coupon-validate'),
+    path('coupons/active/', ActiveCouponListView.as_view(), name='active-coupon-list'),
 
     # Partner
+    path('partner/hotels/', PartnerHotelRegisterView.as_view(), name='partner-hotel-register'),
+    path('partner/hotels/<int:pk>/', PartnerHotelDetailView.as_view(), name='partner-hotel-delete'),
     path('partner/update-rates/', PartnerRatesView.as_view(), name='partner-update-rates'),
     path('partner/rooms/', PartnerRoomManageView.as_view(), name='partner-room-create'),
     path('partner/rooms/<int:pk>/', PartnerRoomManageView.as_view(), name='partner-room-update'),

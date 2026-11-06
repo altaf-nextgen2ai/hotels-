@@ -1,8 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { X, Check, ShieldCheck, CreditCard, User, Mail, Phone, Calendar, Moon, BedDouble, Users } from 'lucide-react';
 
-export default function BookingCheckoutModal({ hotel, room, searchDetails, currentUser, onClose, onProceedToPayment }) {
+export default function BookingCheckoutModal({ hotel, room, searchDetails, currentUser, onClose, onProceedToPayment, onRequireLogin }) {
   if (!hotel || !room) return null;
+
+  const loggedInCustomer = currentUser?.role === 'CUSTOMER';
 
   const getToday = () => new Date().toISOString().split('T')[0];
   const getTomorrow = () => {
@@ -22,8 +24,6 @@ export default function BookingCheckoutModal({ hotel, room, searchDetails, curre
   const [guestEmail,      setGuestEmail]       = useState(currentUser?.email || '');
   const [guestPhone,      setGuestPhone]       = useState(currentUser?.phone || '');
   const [specialRequests, setSpecialRequests]  = useState('');
-  const [needGst,         setNeedGst]          = useState(false);
-  const [gstNumber,       setGstNumber]        = useState('');
 
   // ── Live calculations ──────────────────────────────────────────────────────
   const nights = useMemo(() => {
@@ -53,6 +53,10 @@ export default function BookingCheckoutModal({ hotel, room, searchDetails, curre
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (!loggedInCustomer) {
+      onRequireLogin?.();
+      return;
+    }
     if (!guestName.trim() || !guestEmail.trim() || !guestPhone.trim()) {
       alert('Please fill all required guest details.');
       return;
@@ -67,7 +71,7 @@ export default function BookingCheckoutModal({ hotel, room, searchDetails, curre
       total_price:      finalTotal,
       discount_amount:  0,
       coupon_code:      '',
-      special_requests: `${specialRequests}${needGst && gstNumber ? ` [GST: ${gstNumber}]` : ''}`.trim(),
+      special_requests: specialRequests.trim(),
       guest_name:       guestName,
       guest_email:      guestEmail,
       guest_phone:      guestPhone,
@@ -75,7 +79,7 @@ export default function BookingCheckoutModal({ hotel, room, searchDetails, curre
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-[100] bg-slate-950/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
       <div className="bg-white rounded-none sm:rounded-3xl max-w-full sm:max-w-2xl md:max-w-3xl w-full shadow-2xl border-0 sm:border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 min-h-screen sm:min-h-0 sm:my-8">
 
         {/* Header */}
@@ -90,6 +94,21 @@ export default function BookingCheckoutModal({ hotel, room, searchDetails, curre
         </div>
 
         <form onSubmit={handleSubmit} className="p-4 sm:p-6 flex flex-col md:grid md:grid-cols-12 gap-6">
+
+          {!loggedInCustomer && (
+            <div className="md:col-span-12 bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-amber-900">
+                You need to sign in before you can pay and confirm this booking.
+              </p>
+              <button
+                type="button"
+                onClick={() => onRequireLogin?.()}
+                className="text-xs font-bold bg-[#0F172A] text-[#D4AF37] px-3 py-2 rounded-lg hover:brightness-110 transition"
+              >
+                Sign in now
+              </button>
+            </div>
+          )}
 
           {/* ── LEFT: Form ── */}
           <div className="md:col-span-7 space-y-4">
@@ -225,20 +244,6 @@ export default function BookingCheckoutModal({ hotel, room, searchDetails, curre
                 className="w-full bg-slate-50 border-2 border-slate-200 rounded-xl p-2.5 text-xs font-medium text-slate-800 focus:outline-none focus:border-[#D4AF37] transition resize-none"
               />
             </div>
-
-            <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
-              <input type="checkbox" checked={needGst} onChange={(e) => setNeedGst(e.target.checked)} className="rounded accent-[#D4AF37] w-4 h-4" />
-              I need a GST Invoice (for business)
-            </label>
-            {needGst && (
-              <input
-                type="text"
-                placeholder="Enter 15-digit GSTIN (e.g. 27AAAAA0000A1Z5)"
-                value={gstNumber}
-                onChange={(e) => setGstNumber(e.target.value)}
-                className="w-full bg-slate-50 border-2 border-slate-200 rounded-xl p-2.5 text-xs font-mono focus:outline-none focus:border-[#D4AF37] transition"
-              />
-            )}
           </div>
 
           {/* ── RIGHT: Fare Summary ── */}

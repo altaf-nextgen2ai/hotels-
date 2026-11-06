@@ -7,13 +7,15 @@ export default function Header({ currentUser, onOpenAuth, onLogout, onNavigateVi
   const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   return (
-    <header className="w-full sticky top-0 z-50 bg-white shadow-md">
+    <header className="w-full sticky top-0 z-40 bg-white shadow-md safe-area-top">
       {/* Top bar */}
       <div className="bg-[#0A192F] text-slate-200 text-xs py-2 px-4 md:px-8 flex justify-between items-center border-b border-slate-800">
         <div className="flex items-center gap-2 font-medium">
           <Phone className="w-3.5 h-3.5 text-[#D4AF37]" />
-          <span className="hidden sm:inline">Toll Free : <strong className="text-white">1800-270-0297</strong></span>
-          <span className="sm:hidden text-white font-bold">1800-270-0297</span>
+          <a href="tel:+918447151225" className="hidden sm:inline hover:text-[#D4AF37] transition">
+            Support : <strong className="text-white">+91 8447151225</strong>
+          </a>
+          <a href="tel:+918447151225" className="sm:hidden text-white font-bold hover:text-[#D4AF37]">8447151225</a>
         </div>
         <div className="flex items-center gap-3">
           {(!currentUser || currentUser.role === 'CUSTOMER') && (
@@ -163,10 +165,28 @@ export default function Header({ currentUser, onOpenAuth, onLogout, onNavigateVi
               { label: 'Support',     fn: () => { onOpenSupport(); setShowMobileMenu(false); } },
             ].map(({ label, fn }) => (
               <button key={label} onClick={fn}
-                className="w-full text-left px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 rounded-xl transition">
+                className="w-full text-left px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 rounded-xl transition min-h-[44px]">
                 {label}
               </button>
             ))}
+            {currentUser?.role === 'VENDOR' && (
+              <button onClick={() => { onNavigateView('partner'); setShowMobileMenu(false); }}
+                className="w-full text-left px-4 py-3 text-sm font-bold text-emerald-700 hover:bg-emerald-50 rounded-xl min-h-[44px]">
+                Vendor Dashboard
+              </button>
+            )}
+            {currentUser?.role === 'ADMIN' && (
+              <button onClick={() => { onNavigateView('admin'); setShowMobileMenu(false); }}
+                className="w-full text-left px-4 py-3 text-sm font-bold text-amber-700 hover:bg-amber-50 rounded-xl min-h-[44px]">
+                Admin Panel
+              </button>
+            )}
+            {(!currentUser || currentUser.role === 'CUSTOMER') && (
+              <button onClick={() => { onNavigateView('become-partner'); setShowMobileMenu(false); }}
+                className="w-full text-left px-4 py-3 text-sm font-bold text-[#967414] hover:bg-amber-50 rounded-xl min-h-[44px]">
+                Become a Partner
+              </button>
+            )}
             {currentUser && (
               <button onClick={() => { onLogout(); setShowMobileMenu(false); }}
                 className="w-full text-left px-4 py-3 text-sm font-bold text-rose-600 hover:bg-rose-50 rounded-xl transition flex items-center gap-2">

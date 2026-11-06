@@ -5,7 +5,7 @@ import {
   CheckCircle2, Clock, XCircle, AlertTriangle, RefreshCw, Bell,
   ChevronRight, ArrowUpRight, ArrowDownRight, Banknote, BarChart3,
   Package, Tag, HelpCircle, Wifi, Coffee, Car, Dumbbell, Waves,
-  Utensils, ShieldCheck, Moon, Save, Building2, Eye, ChevronDown
+  Utensils, ShieldCheck, Moon, Save, Building2, Eye, ChevronDown, Trash2
 } from 'lucide-react';
 import { apiService } from '../services/api';
 
@@ -22,9 +22,10 @@ const STATUS_META = {
 
 const NAV = [
   { id: 'dashboard', label: 'Dashboard',         icon: LayoutDashboard },
+  { id: 'properties', label: 'My Hotels',        icon: Building2       },
   { id: 'bookings',  label: 'Bookings',           icon: Calendar        },
   { id: 'rooms',     label: 'Rooms & Rates',      icon: BedDouble       },
-  { id: 'property',  label: 'My Property',        icon: Hotel           },
+  { id: 'property',  label: 'Property Details',   icon: Hotel           },
   { id: 'revenue',   label: 'Revenue & Payouts',  icon: IndianRupee     },
   { id: 'register',  label: 'Add New Property',   icon: PlusCircle      },
 ];
@@ -69,6 +70,14 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
   const [savingId,   setSavingId]   = useState(null);
   const [toast,      setToast]      = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [partnerHotels, setPartnerHotels] = useState([]);
+  const [hotelsLoading, setHotelsLoading] = useState(true);
+  const [deletingHotelId, setDeletingHotelId] = useState(null);
+
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   // Get latest user from localStorage (may have been updated after hotel registration)
   const latestUser = (() => {
@@ -76,13 +85,49 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
     catch { return currentUser; }
   })();
 
-  const vendorHotels = latestUser?.role === 'ADMIN'
-    ? hotels
-    : hotels.filter(h => String(h.id) === String(latestUser?.hotel));
+  const loadPartnerHotels = useCallback(async () => {
+    if (latestUser?.role === 'VENDOR' && latestUser?.vendor_status === 'APPROVED') {
+      setHotelsLoading(true);
+      const data = await apiService.getPartnerHotels();
+      if (Array.isArray(data)) {
+        setPartnerHotels(data);
+      } else if (data?.error) {
+        showToast(data.error, 'error');
+      }
+      setHotelsLoading(false);
+      return;
+    }
+    if (latestUser?.role === 'ADMIN') {
+      setPartnerHotels(hotels);
+      setHotelsLoading(false);
+      return;
+    }
+    setPartnerHotels([]);
+    setHotelsLoading(false);
+  }, [latestUser?.role, latestUser?.vendor_status, hotels]);
 
-  const [selectedHotelId, setSelectedHotelId] = useState(
-    vendorHotels[0]?.id || null
-  );
+  useEffect(() => {
+    loadPartnerHotels();
+  }, [loadPartnerHotels]);
+
+  const vendorHotels = partnerHotels.length > 0
+    ? partnerHotels
+    : (latestUser?.role === 'ADMIN'
+      ? hotels
+      : hotels.filter(h => String(h.id) === String(latestUser?.hotel)));
+
+  const [selectedHotelId, setSelectedHotelId] = useState(null);
+
+  useEffect(() => {
+    if (!vendorHotels.length) {
+      setSelectedHotelId(null);
+      return;
+    }
+    const stillValid = vendorHotels.some(h => String(h.id) === String(selectedHotelId));
+    if (!stillValid) {
+      setSelectedHotelId(vendorHotels[0]?.id ?? null);
+    }
+  }, [vendorHotels, selectedHotelId]);
   const hotel = vendorHotels.find(h => String(h.id) === String(selectedHotelId)) || vendorHotels[0] || null;
   const [rooms, setRooms] = useState(hotel?.rooms || []);
 
@@ -148,18 +193,55 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const showToast = (msg, type = 'success') => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3500);
+  const handleDeleteHotel = async (hotelId, hotelName) => {
+    if (!window.confirm(`Remove "${hotelName}" from Trumitrip? Past bookings stay in history; active bookings must be cleared first.`)) {
+      return;
+    }
+    setDeletingHotelId(hotelId);
+    const res = await apiService.deletePartnerHotel(hotelId);
+    setDeletingHotelId(null);
+    if (res?.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    showToast(res.message || 'Property removed');
+    const remaining = partnerHotels.filter(h => String(h.id) !== String(hotelId));
+    setPartnerHotels(remaining);
+    if (String(selectedHotelId) === String(hotelId)) {
+      setSelectedHotelId(remaining[0]?.id ?? null);
+    }
+    if (onRefreshHotels) await onRefreshHotels();
+    await loadPartnerHotels();
+    const savedUser = JSON.parse(localStorage.getItem('trumitrip_user') || '{}');
+    if (savedUser?.role === 'VENDOR' && String(savedUser.hotel) === String(hotelId)) {
+      const next = remaining[0];
+      if (next) {
+        savedUser.hotel = next.id;
+        savedUser.hotel_name = next.name;
+        savedUser.hotel_city = next.city;
+        savedUser.hotel_address = next.address;
+      } else {
+        delete savedUser.hotel;
+        delete savedUser.hotel_name;
+        delete savedUser.hotel_city;
+        delete savedUser.hotel_address;
+      }
+      localStorage.setItem('trumitrip_user', JSON.stringify(savedUser));
+    }
   };
 
   const handleUpdateStatus = async (bookingId, newStatus) => {
+    const booking = bookings.find((item) => item.booking_id === bookingId);
+    if (newStatus === 'PARTNER_CANCELLED' && !window.confirm(
+      `Cancel booking ${bookingId}? The guest will receive a full refund of ₹${fmt(booking?.total_price)}.`
+    )) return;
+
     setSavingId(bookingId);
     const res = await apiService.updatePartnerBookingStatus(bookingId, newStatus);
     if (res?.booking) {
-      setBookings(prev => prev.map(b => b.booking_id === bookingId ? { ...b, status: newStatus } : b));
-      showToast(`Booking updated to ${newStatus}`);
-    } else showToast('Update failed', 'error');
+      setBookings(prev => prev.map(b => b.booking_id === bookingId ? { ...b, ...res.booking } : b));
+      showToast(res.message || `Booking updated to ${newStatus}`);
+    } else showToast(res?.error || 'Update failed', 'error');
     setSavingId(null);
   };
 
@@ -183,19 +265,27 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
       gallery_images: newHotel.gallery_images || [],
     });
     setRegistering(false);
-    if (res?.id) {
-      // Update currentUser in localStorage so hotel shows in sidebar immediately
+    if (res?.id && !res.error) {
       const savedUser = JSON.parse(localStorage.getItem('trumitrip_user') || '{}');
       if (savedUser && savedUser.role === 'VENDOR') {
+        const updatedVendor = res.vendor || savedUser;
         savedUser.hotel = res.id;
         savedUser.hotel_name = res.name;
+        savedUser.hotel_city = res.city;
+        savedUser.hotel_address = res.address;
+        if (res.vendor) {
+          Object.assign(savedUser, res.vendor);
+        }
         localStorage.setItem('trumitrip_user', JSON.stringify(savedUser));
       }
       if (onRefreshHotels) await onRefreshHotels();
+      await loadPartnerHotels();
       setSelectedHotelId(res.id);
       showToast(`${res.name} registered successfully!`);
       setActiveTab('dashboard');
-    } else showToast('Registration failed. Check all fields.', 'error');
+    } else {
+      showToast(res?.error || 'Registration failed. Check all fields and try again.', 'error');
+    }
   };
 
   // Metrics
@@ -213,7 +303,7 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex font-sans">
+    <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row font-sans">
 
       {/* ── SIDEBAR ─────────────────────────────────────────────────────────── */}
       <aside className={`${sidebarOpen ? 'w-56' : 'w-16'} bg-white border-r border-gray-200 flex flex-col transition-all duration-200 shrink-0 hidden md:flex`}>
@@ -231,7 +321,9 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
         {/* Hotel selector */}
         {sidebarOpen && vendorHotels.length > 0 && (
           <div className="px-3 pt-3 pb-2">
-            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Property</p>
+            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
+              Property · {vendorHotels.length} registered
+            </p>
             <select
               value={selectedHotelId || ''}
               onChange={e => setSelectedHotelId(Number(e.target.value))}
@@ -260,6 +352,9 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
               {sidebarOpen && id === 'bookings' && bookings.length > 0 && (
                 <span className="ml-auto bg-blue-100 text-blue-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full">{bookings.length}</span>
               )}
+              {sidebarOpen && id === 'properties' && vendorHotels.length > 0 && (
+                <span className="ml-auto bg-emerald-100 text-emerald-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full">{vendorHotels.length}</span>
+              )}
             </button>
           ))}
         </nav>
@@ -287,14 +382,14 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
       <div className="flex-1 flex flex-col min-w-0">
 
         {/* Topbar */}
-        <header className="h-14 bg-white border-b border-gray-200 px-5 flex items-center justify-between sticky top-0 z-10">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-gray-400 hover:text-gray-600 hidden md:block">
+        <header className="h-14 bg-white border-b border-gray-200 px-3 sm:px-5 flex items-center justify-between sticky top-0 z-20 safe-area-top">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-gray-400 hover:text-gray-600 hidden md:block shrink-0">
               <BarChart3 className="w-4 h-4" />
             </button>
-            <div>
-              <h1 className="text-sm font-bold text-gray-900">{NAV.find(n => n.id === activeTab)?.label}</h1>
-              {hotel && <p className="text-[10px] text-gray-400">{hotel.name} · {hotel.city}</p>}
+            <div className="min-w-0">
+              <h1 className="text-sm font-bold text-gray-900 truncate">{NAV.find(n => n.id === activeTab)?.label}</h1>
+              {hotel && <p className="text-[10px] text-gray-400 truncate">{hotel.name} · {hotel.city}</p>}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -314,9 +409,39 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
           </div>
         </header>
 
+        {/* Mobile tab navigation */}
+        <nav className="partner-mobile-nav md:hidden sticky top-14 z-10 bg-white border-b border-gray-200 flex gap-1 px-2 py-2 overflow-x-auto shrink-0">
+          {vendorHotels.length > 0 && (
+            <select
+              value={selectedHotelId || ''}
+              onChange={(e) => setSelectedHotelId(Number(e.target.value))}
+              className="shrink-0 max-w-[140px] bg-gray-50 border border-gray-200 text-gray-800 text-[10px] font-semibold rounded-lg px-2 py-2 mr-1"
+            >
+              {vendorHotels.map(h => (
+                <option key={h.id} value={h.id}>{h.name}</option>
+              ))}
+            </select>
+          )}
+          {NAV.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setActiveTab(id)}
+              className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-[11px] font-bold whitespace-nowrap min-h-[40px] transition ${
+                activeTab === id
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-600'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {label.split(' ')[0]}
+            </button>
+          ))}
+        </nav>
+
         {/* Toast */}
         {toast && (
-          <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg text-sm font-semibold ${
+          <div className={`fixed top-16 sm:top-4 left-3 right-3 sm:left-auto sm:right-4 z-[110] flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg text-sm font-semibold ${
             toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'
           }`}>
             {toast.type === 'error' ? <XCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
@@ -324,7 +449,7 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
           </div>
         )}
 
-        <main className="flex-1 p-5 space-y-5 overflow-y-auto">
+        <main className="flex-1 p-3 sm:p-5 space-y-5 overflow-y-auto overflow-x-hidden safe-area-bottom pb-8">
 
           {/* No hotel warning */}
           {!hotel && activeTab !== 'register' && (
@@ -343,6 +468,25 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
           {/* ══════════════════════ DASHBOARD ══════════════════════ */}
           {activeTab === 'dashboard' && hotel && (
             <div className="space-y-5">
+
+              <div className="bg-white border border-gray-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Your portfolio</p>
+                  <p className="text-lg font-black text-gray-900 mt-0.5">
+                    {vendorHotels.length} hotel{vendorHotels.length !== 1 ? 's' : ''} registered on Trumitrip
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setActiveTab('properties')}
+                    className="text-xs font-bold text-blue-600 border border-blue-200 bg-blue-50 px-3 py-2 rounded-lg hover:bg-blue-100 transition">
+                    View all properties
+                  </button>
+                  <button type="button" onClick={() => setActiveTab('register')}
+                    className="text-xs font-bold text-white bg-blue-600 px-3 py-2 rounded-lg hover:bg-blue-700 transition flex items-center gap-1">
+                    <PlusCircle className="w-3.5 h-3.5" /> Add new
+                  </button>
+                </div>
+              </div>
 
               {/* KPI cards */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -381,7 +525,7 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
               {/* Commission summary */}
               <div className="bg-white border border-gray-200 rounded-xl p-5">
                 <h3 className="text-sm font-bold text-gray-900 mb-4">Commission & Payout Split</h3>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
                   {[
                     { label: 'Gross Revenue',      value: grossRev,   bg: 'bg-gray-50',    text: 'text-gray-900' },
                     { label: 'Platform Commission', value: commission, bg: 'bg-red-50',     text: 'text-red-600'  },
@@ -478,11 +622,98 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
             </div>
           )}
 
+          {/* ══════════════════════ MY HOTELS (PORTFOLIO) ══════════════════════ */}
+          {activeTab === 'properties' && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-bold text-gray-900">Registered properties</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {hotelsLoading ? 'Loading…' : `${vendorHotels.length} active listing${vendorHotels.length !== 1 ? 's' : ''} on your account`}
+                  </p>
+                </div>
+                <button type="button" onClick={() => setActiveTab('register')}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition">
+                  <PlusCircle className="w-4 h-4" /> Add new property
+                </button>
+              </div>
+
+              {hotelsLoading ? (
+                <div className="bg-white border border-gray-200 rounded-xl p-12 text-center text-sm text-gray-400">
+                  <RefreshCw className="w-6 h-6 mx-auto animate-spin mb-2" /> Loading your hotels…
+                </div>
+              ) : vendorHotels.length === 0 ? (
+                <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
+                  <Building2 className="w-10 h-10 mx-auto text-gray-300 mb-3" />
+                  <p className="font-semibold text-gray-700 text-sm">No hotels registered yet</p>
+                  <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">Add your first property to appear in search and receive bookings.</p>
+                  <button type="button" onClick={() => setActiveTab('register')}
+                    className="mt-4 text-xs font-bold text-blue-600 hover:underline inline-flex items-center gap-1">
+                    Register your first hotel <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {vendorHotels.map((h) => {
+                    const isSelected = String(h.id) === String(selectedHotelId);
+                    const roomCount = (h.rooms || []).length;
+                    return (
+                      <div key={h.id}
+                        className={`bg-white border rounded-xl overflow-hidden hover:shadow-md transition ${isSelected ? 'border-blue-400 ring-2 ring-blue-100' : 'border-gray-200'}`}>
+                        <div className="h-36 relative">
+                          <img src={h.main_image} alt={h.name} className="w-full h-full object-cover" />
+                          {isSelected && (
+                            <span className="absolute top-2 left-2 text-[10px] font-bold bg-blue-600 text-white px-2 py-0.5 rounded-full">
+                              Active workspace
+                            </span>
+                          )}
+                        </div>
+                        <div className="p-4 space-y-3">
+                          <div>
+                            <h3 className="text-sm font-bold text-gray-900 line-clamp-1">{h.name}</h3>
+                            <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                              <MapPin className="w-3 h-3 shrink-0" /> {h.city}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2 text-[10px] font-semibold text-gray-600">
+                            <span className="bg-gray-100 px-2 py-1 rounded-full">{h.star_rating}★</span>
+                            <span className="bg-gray-100 px-2 py-1 rounded-full">{roomCount} room type{roomCount !== 1 ? 's' : ''}</span>
+                            <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full">₹{fmt(h.price_per_night)}/night</span>
+                          </div>
+                          <div className="flex gap-2 pt-1">
+                            <button type="button"
+                              onClick={() => { setSelectedHotelId(h.id); setActiveTab('dashboard'); }}
+                              className="flex-1 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg transition">
+                              Manage
+                            </button>
+                            <button type="button"
+                              onClick={() => { setSelectedHotelId(h.id); setActiveTab('property'); }}
+                              className="text-xs font-bold border border-gray-200 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-50 transition"
+                              title="View details">
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button type="button"
+                              onClick={() => handleDeleteHotel(h.id, h.name)}
+                              disabled={deletingHotelId === h.id}
+                              className="text-xs font-bold border border-red-200 text-red-600 px-3 py-2 rounded-lg hover:bg-red-50 transition disabled:opacity-50"
+                              title="Remove listing">
+                              {deletingHotelId === h.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ══════════════════════ BOOKINGS ══════════════════════ */}
           {activeTab === 'bookings' && (
             <div className="space-y-3">
               {/* Summary strip */}
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
                 {[
                   { label: 'Total',      count: bookings.length,                                                          color: 'bg-gray-100 text-gray-700'    },
                   { label: 'Confirmed',  count: bookings.filter(b => b.status === 'CONFIRMED').length,                   color: 'bg-emerald-100 text-emerald-700' },
@@ -536,7 +767,13 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
                           ['Rooms · Guests', `${b.rooms_count || 1}R · ${b.guests_count || 1}G`],
                           ['Payment',      b.payment_mode?.replace('_', ' ') || '—'],
                           ['Total Paid',   `₹${fmt(b.total_price)}`],
-                          ['Your Payout',  `₹${fmt(b.net_partner_payout)}`],
+                          ['Your Payout',  b.status.includes('CANCELLED') ? 'Voided' : `₹${fmt(b.net_partner_payout)}`],
+                          ...(b.status.includes('CANCELLED') ? [
+                            ['Cancellation Fee', `₹${fmt(b.cancellation_fee)}`],
+                            ['Refund · Status', `₹${fmt(b.refund_amount)} · ${b.refund_status?.replaceAll('_', ' ') || 'NOT APPLICABLE'}`],
+                          ] : b.refund_status === 'REVIEW_REQUIRED' ? [
+                            ['Refund review', 'Contact TRUMITRIP support'],
+                          ] : []),
                         ].map(([label, val]) => (
                           <div key={label} className="bg-gray-50 rounded-lg p-2.5">
                             <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">{label}</p>
@@ -714,7 +951,7 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
           {/* ══════════════════════ REVENUE ══════════════════════ */}
           {activeTab === 'revenue' && (
             <div className="space-y-4">
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
                 {[
                   { label: 'Gross Revenue',      value: grossRev,   bg: 'bg-gray-50',    vColor: 'text-gray-900',    desc: 'Customer total payments' },
                   { label: 'Platform Commission', value: commission, bg: 'bg-red-50',     vColor: 'text-red-600',     desc: `${hotel?.commission_percent || 10}% Trumitrip fee` },
@@ -858,7 +1095,7 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-2">Amenities</label>
                   <div className="flex flex-wrap gap-2">
-                    {['WiFi','Pool','Spa','Breakfast','AC','Gym','Beachfront','Bar','Parking','Valet','Restaurant','Room Service','FREE Cancellation','Pay at Hotel'].map(a => (
+                    {['WiFi','Pool','Spa','Breakfast','AC','Gym','Beachfront','Bar','Parking','Valet','Restaurant','Room Service','FREE Cancellation'].map(a => (
                       <button key={a} type="button"
                         onClick={() => setNewHotel(p => ({ ...p, amenities: p.amenities.includes(a) ? p.amenities.filter(x => x !== a) : [...p.amenities, a] }))}
                         className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition ${newHotel.amenities.includes(a) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`}

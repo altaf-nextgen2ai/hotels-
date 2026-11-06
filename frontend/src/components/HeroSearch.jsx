@@ -6,8 +6,8 @@ const toDateStr = (d) => d.toISOString().split('T')[0];
 const todayStr    = () => toDateStr(new Date());
 const tomorrowStr = () => { const d = new Date(); d.setDate(d.getDate() + 1); return toDateStr(d); };
 
-export default function HeroSearch({ onSearch, hotels = [] }) {
-  const [destination,    setDestination]    = useState('');
+export default function HeroSearch({ onSearch, hotels = [], initialDestination = '' }) {
+  const [destination,    setDestination]    = useState(initialDestination);
   const [checkIn,        setCheckIn]        = useState(todayStr());
   const [checkOut,       setCheckOut]       = useState(tomorrowStr());
   const [rooms,          setRooms]          = useState(1);
@@ -23,6 +23,10 @@ export default function HeroSearch({ onSearch, hotels = [] }) {
 
   const dropdownRef = useRef(null);
   const debounceRef = useRef(null);
+
+  useEffect(() => {
+    if (initialDestination) setDestination(initialDestination);
+  }, [initialDestination]);
 
   // ── Our own hotels from DB as quick suggestions ────────────────────────────
   const dbSuggestions = React.useMemo(() => {
@@ -130,7 +134,7 @@ export default function HeroSearch({ onSearch, hotels = [] }) {
   })();
 
   return (
-    <div className="relative bg-[#0A192F] text-white pt-10 pb-28 px-4 md:px-8 overflow-x-hidden min-h-[500px] flex flex-col justify-center">
+    <div className="relative bg-[#0A192F] text-white pt-8 sm:pt-10 pb-24 sm:pb-28 px-4 md:px-8 overflow-x-hidden min-h-[440px] sm:min-h-[500px] flex flex-col justify-center">
       {/* Background */}
       <div className="absolute inset-0 bg-cover bg-center opacity-30 mix-blend-luminosity scale-105"
         style={{ backgroundImage: `url('https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=2000&q=80')` }} />
@@ -146,7 +150,7 @@ export default function HeroSearch({ onSearch, hotels = [] }) {
       <div className="max-w-6xl mx-auto w-full relative z-10">
         {/* Headline */}
         <div className="text-center md:text-left mb-8 max-w-2xl">
-          <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight leading-tight">
+          <h1 className="text-2xl sm:text-3xl md:text-5xl font-extrabold tracking-tight leading-tight">
             Find the Perfect Stay <br />
             <span className="text-[#D4AF37] underline decoration-[#D4AF37]/40 decoration-4 underline-offset-8">
               for Your Next Trip

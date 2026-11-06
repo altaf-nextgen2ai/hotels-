@@ -102,14 +102,6 @@ def seed_database():
 
     # Seed Admin and Vendors
     print("Creating default Admin & Hotel Partner (Vendor) user accounts...")
-    UserProfile.objects.create(
-        name="System Administrator",
-        email="admin@trumitrip.com",
-        phone="+91 9999900000",
-        password="admin123",
-        role="ADMIN"
-    )
-
     if created_hotels:
         UserProfile.objects.create(
             name="Taj Exotica Manager",

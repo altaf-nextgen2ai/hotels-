@@ -3,14 +3,17 @@ import string
 import secrets
 import hmac
 import hashlib
+import logging
 from datetime import timedelta, date as date_type
 from django.conf import settings
+from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from django.core.validators import validate_email
 from django.http import HttpResponse
 from django.utils import timezone
 from django.contrib.auth.hashers import check_password, make_password
+from django.db import transaction
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, generics
@@ -18,13 +21,39 @@ from django.db.models import Q, Sum, Count
 from django.db.models.functions import TruncMonth
 from .models import Hotel, Room, Booking, Coupon, Review, UserProfile
 from .serializers import HotelSerializer, RoomSerializer, BookingSerializer, CouponSerializer, ReviewSerializer, UserProfileSerializer
-from .services.email_service import send_booking_confirmation, send_vendor_account_email
+from .services.email_service import (
+    send_booking_cancellation_notifications,
+    send_booking_notifications,
+    send_refund_processed_email,
+    send_vendor_account_email,
+    send_vendor_application_admin_email,
+)
 from .services.pdf_service import generate_booking_pdf
 
 import razorpay
 razorpay_client = razorpay.Client(
     auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
 )
+logger = logging.getLogger(__name__)
+
+CUSTOMER_REFUND_ETA = '2 to 5 working days'
+CUSTOMER_CANCELLATION_POLICY = (
+    '10% cancellation fee applies; the remaining 90% is refunded to your original payment method '
+    f'within {CUSTOMER_REFUND_ETA}.'
+)
+
+
+def _customer_cancellation_amounts(booking):
+    """10% platform cancellation fee; 90% refund for paid bookings not yet checked in."""
+    total = int(booking.total_price or 0)
+    if booking.status in ('CHECKED_IN', 'COMPLETED'):
+        return 0, total
+    if booking.payment_status != 'SUCCESS':
+        return 0, 0
+    cancellation_fee = int(round(total * 0.10))
+    refund_amount = max(total - cancellation_fee, 0)
+    return refund_amount, cancellation_fee
+
 
 def admin_access_error(request):
     token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
@@ -37,6 +66,66 @@ def admin_access_error(request):
     if user.role != 'ADMIN':
         return Response({"error": "Administrator access required."}, status=status.HTTP_403_FORBIDDEN)
     return None
+
+
+def partner_access_user(request):
+    token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+    user = UserProfile.objects.filter(
+        auth_token=token,
+        is_email_verified=True,
+    ).first() if token else None
+    if not user:
+        return None, Response({"error": "Partner login required."}, status=status.HTTP_401_UNAUTHORIZED)
+    if user.role != 'VENDOR':
+        return None, Response({"error": "Hotel partner access required."}, status=status.HTTP_403_FORBIDDEN)
+    if user.vendor_status != 'APPROVED':
+        return None, Response({"error": "Your partner account is not approved yet."}, status=status.HTTP_403_FORBIDDEN)
+    return user, None
+
+
+def _seed_default_rooms(hotel):
+    if hotel.rooms.exists():
+        return
+    Room.objects.create(
+        hotel=hotel,
+        room_type="Deluxe Suite",
+        price_per_night=hotel.price_per_night,
+        max_guests=2,
+        bed_type="1 King Bed",
+        available_count=8,
+        total_rooms=10,
+        blocked_rooms=0,
+        status='ACTIVE',
+        inclusions=["Breakfast Included", "Free High-Speed WiFi", "Swimming Pool Access"],
+    )
+    Room.objects.create(
+        hotel=hotel,
+        room_type="Executive Ocean Suite",
+        price_per_night=int(hotel.price_per_night * 1.35),
+        max_guests=3,
+        bed_type="1 King Bed + Lounge",
+        available_count=4,
+        total_rooms=5,
+        blocked_rooms=0,
+        status='ACTIVE',
+        inclusions=["Breakfast & Dinner Included", "Airport Private Transfer", "Spa & Sauna Access"],
+    )
+
+
+def _vendor_hotels_for_user(user):
+    if user.role != 'VENDOR' or user.vendor_status != 'APPROVED':
+        return Hotel.objects.none()
+    owned = Hotel.objects.filter(owner=user)
+    if owned.exists():
+        return owned
+    if user.hotel_id:
+        return Hotel.objects.filter(pk=user.hotel_id)
+    if user.application_hotel_name and user.application_city:
+        return Hotel.objects.filter(
+            name__iexact=user.application_hotel_name,
+            city__iexact=user.application_city,
+        )
+    return Hotel.objects.none()
 
 class SignupView(APIView):
     def post(self, request):
@@ -118,18 +207,34 @@ class VerifySignupView(APIView):
 
 class LoginView(APIView):
     def post(self, request):
-        email = request.data.get('email', '').strip().lower()
+        username = request.data.get('username', request.data.get('email', '')).strip()
+        email = request.data.get('email', username).strip().lower()
         password = request.data.get('password', '').strip()
 
-        # Hardcoded Admin credentials fallback
-        if email == 'admin@trumitrip.com' and password == 'admin123':
+        django_user = authenticate(request, username=username, password=password)
+        if django_user and django_user.is_superuser:
+            admin_email = django_user.email.strip().lower()
+            if not admin_email:
+                return Response(
+                    {"error": "Set an email address on the Django superuser before logging in."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            admin_name = django_user.get_full_name().strip() or django_user.username
             admin_user, _ = UserProfile.objects.get_or_create(
-                email='admin@trumitrip.com',
-                defaults={'name': 'System Administrator', 'password': 'admin123', 'role': 'ADMIN'}
+                email=admin_email,
+                defaults={
+                    'name': admin_name,
+                    'password': make_password(secrets.token_urlsafe(32)),
+                    'role': 'ADMIN',
+                    'is_email_verified': True,
+                }
             )
+            admin_user.name = admin_name
+            admin_user.role = 'ADMIN'
             admin_user.auth_token = secrets.token_urlsafe(32)
             admin_user.is_email_verified = True
-            admin_user.save(update_fields=['auth_token', 'is_email_verified'])
+            admin_user.save(update_fields=['name', 'role', 'auth_token', 'is_email_verified'])
             serializer = UserProfileSerializer(admin_user)
             return Response({"user": serializer.data, "token": admin_user.auth_token, "message": "Admin Login Successful"})
 
@@ -157,20 +262,25 @@ class CreateVendorView(APIView):
         email = request.data.get('email', '').strip().lower()
         phone = request.data.get('phone', '').strip()
         password = request.data.get('password', '').strip()
-        hotel_id = request.data.get('hotel_id')
+        hotel_name = request.data.get('hotel_name', '').strip()
+        city = request.data.get('city', '').strip()
+        address = request.data.get('address', '').strip()
+        try:
+            total_rooms = int(request.data.get('total_rooms') or 0)
+        except (TypeError, ValueError):
+            return Response({"error": "Total room capacity must be a whole number."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not name or not email or not password:
-            return Response({"error": "Vendor Name, Email, and Password are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not name or not email or not password or not hotel_name or not city:
+            return Response({"error": "Name, email, password, hotel name, and city are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if total_rooms < 1:
+            return Response({"error": "Total room capacity must be at least one."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            validate_email(email)
+        except ValidationError:
+            return Response({"error": "Enter a valid email address."}, status=status.HTTP_400_BAD_REQUEST)
 
         if UserProfile.objects.filter(email=email).exists():
             return Response({"error": "A user with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
-
-        hotel = None
-        if hotel_id:
-            try:
-                hotel = Hotel.objects.get(id=hotel_id)
-            except Hotel.DoesNotExist:
-                pass
 
         vendor = UserProfile.objects.create(
             name=name,
@@ -180,13 +290,19 @@ class CreateVendorView(APIView):
             role='VENDOR',
             vendor_status='PENDING',
             is_email_verified=True,
-            hotel=hotel
+            auth_token=secrets.token_hex(32),
+            application_hotel_name=hotel_name,
+            application_city=city,
+            application_address=address,
+            application_total_rooms=total_rooms,
         )
 
         serializer = UserProfileSerializer(vendor)
         send_vendor_account_email(vendor, 'PENDING')
+        send_vendor_application_admin_email(vendor)
         return Response({
             "message": "Vendor application submitted successfully. Pending admin approval.",
+            "token": vendor.auth_token,
             "vendor": serializer.data
         }, status=status.HTTP_201_CREATED)
 
@@ -267,6 +383,7 @@ class AdminVendorManageView(APIView):
             is_email_verified=True,
             hotel=hotel,
         )
+        send_vendor_account_email(vendor, vendor_status)
         return Response(UserProfileSerializer(vendor).data, status=status.HTTP_201_CREATED)
 
     def patch(self, request, pk):
@@ -279,6 +396,7 @@ class AdminVendorManageView(APIView):
             return Response({"error": "Vendor record not found."}, status=status.HTTP_404_NOT_FOUND)
 
         updates = {}
+        previous_status = vendor.vendor_status
         for field in ('name', 'phone'):
             if field in request.data:
                 value = request.data[field].strip()
@@ -313,6 +431,8 @@ class AdminVendorManageView(APIView):
             setattr(vendor, field, value)
         if updates:
             vendor.save(update_fields=list(updates))
+            if 'vendor_status' in updates and updates['vendor_status'] != previous_status:
+                send_vendor_account_email(vendor, vendor.vendor_status)
         return Response(UserProfileSerializer(vendor).data)
 
     def delete(self, request, pk):
@@ -342,13 +462,61 @@ class AdminBookingManageView(APIView):
         valid_statuses = {choice[0] for choice in Booking.STATUS_CHOICES}
         if status_value not in valid_statuses:
             return Response({"error": "Invalid booking status."}, status=status.HTTP_400_BAD_REQUEST)
+        if status_value in ('CUSTOMER_CANCELLED', 'PARTNER_CANCELLED'):
+            return Response({"error": "Use the booking cancellation workflow so refunds and notifications are handled safely."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             booking = Booking.objects.select_related('hotel', 'room', 'user').get(booking_id=booking_id)
         except Booking.DoesNotExist:
             return Response({"error": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+        if booking.status in ('CUSTOMER_CANCELLED', 'PARTNER_CANCELLED'):
+            return Response({"error": "A cancelled booking cannot be reactivated from this screen."}, status=status.HTTP_409_CONFLICT)
         booking.status = status_value
         booking.save(update_fields=['status'])
         return Response(BookingSerializer(booking).data)
+
+
+class AdminManualRefundView(APIView):
+    def post(self, request, booking_id):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+
+        refund_reference = str(request.data.get('refund_reference', '')).strip()
+        if not refund_reference:
+            return Response(
+                {"error": "Enter the manual refund transaction/reference ID."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            try:
+                booking = Booking.objects.select_for_update().select_related('hotel', 'room', 'user').get(
+                    booking_id=booking_id
+                )
+            except Booking.DoesNotExist:
+                return Response({"error": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            if booking.status not in ('CUSTOMER_CANCELLED', 'PARTNER_CANCELLED') or booking.refund_amount <= 0:
+                return Response({"error": "This booking has no refundable cancellation amount."}, status=status.HTTP_409_CONFLICT)
+            if booking.refund_status == 'PROCESSED':
+                return Response({"error": "This refund has already been marked as processed."}, status=status.HTTP_409_CONFLICT)
+            if booking.refund_status not in ('PENDING', 'REVIEW_REQUIRED'):
+                return Response({"error": "This refund is not awaiting manual processing."}, status=status.HTTP_409_CONFLICT)
+
+            booking.refund_status = 'PROCESSED'
+            booking.refund_reference = refund_reference
+            booking.payment_status = (
+                'REFUNDED' if booking.refund_amount == booking.total_price else 'PARTIALLY_REFUNDED'
+            )
+            booking.save(update_fields=['refund_status', 'refund_reference', 'payment_status'])
+
+        email_sent = send_refund_processed_email(booking)
+        return Response({
+            "message": f"Manual refund for {booking_id} recorded as processed.",
+            "booking": BookingSerializer(booking).data,
+            "email_sent": email_sent,
+        })
+
 
 class AdminCouponManageView(APIView):
     def get(self, request):
@@ -363,7 +531,10 @@ class AdminCouponManageView(APIView):
             return access_error
         serializer = CouponSerializer(data=request.data)
         if serializer.is_valid():
-            coupon = serializer.save(code=serializer.validated_data['code'].strip().upper())
+            coupon = serializer.save(
+                code=serializer.validated_data['code'].strip().upper(),
+                is_admin_created=True,
+            )
             return Response(CouponSerializer(coupon).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -380,7 +551,7 @@ class AdminCouponManageView(APIView):
             data['code'] = data['code'].strip().upper()
         serializer = CouponSerializer(coupon, data=data, partial=True)
         if serializer.is_valid():
-            serializer.save()
+            serializer.save(is_admin_created=True)
             return Response(CouponSerializer(coupon).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -471,65 +642,30 @@ class BookingListCreateView(APIView):
             return Response({"error": "Login required."}, status=status.HTTP_401_UNAUTHORIZED)
         hotel_id = request.query_params.get('hotel_id', None)
 
-        queryset = Booking.objects.filter(user=user).order_by('-created_at')
-        if hotel_id:
-            queryset = queryset.filter(hotel_id=hotel_id)
+        if user.role == 'VENDOR':
+            if user.vendor_status != 'APPROVED':
+                return Response({"error": "An approved vendor account is required."}, status=status.HTTP_403_FORBIDDEN)
+            queryset = Booking.objects.filter(hotel__in=_vendor_hotels_for_user(user))
+            if hotel_id:
+                queryset = queryset.filter(hotel_id=hotel_id)
+        elif user.role == 'CUSTOMER':
+            queryset = Booking.objects.filter(user=user)
+            if hotel_id:
+                queryset = queryset.filter(hotel_id=hotel_id)
+        else:
+            return Response({"error": "This account cannot view customer bookings."}, status=status.HTTP_403_FORBIDDEN)
+        queryset = queryset.order_by('-created_at')
 
         serializer = BookingSerializer(queryset, many=True)
         return Response(serializer.data)
 
     def post(self, request):
-        user = self._authenticated_user(request)
-        if not user:
-            return Response({"error": "Login required to book a hotel."}, status=status.HTTP_401_UNAUTHORIZED)
-        data = request.data.copy()
-        data['user'] = user.id
-        data['guest_name'] = user.name
-        data['guest_email'] = user.email
-        data['guest_phone'] = user.phone
-        
-        if 'booking_id' not in data or not data['booking_id']:
-            rand_suffix = ''.join(random.choices(string.digits, k=4))
-            data['booking_id'] = f"TMT-2026-{rand_suffix}"
-
-        # Financial Snapshot — use hotel's commission_percent (per-hotel, not hardcoded)
-        total = int(data.get('total_price', 0))
-        try:
-            hotel_obj = Hotel.objects.get(pk=data.get('hotel'))
-            comm_rate = hotel_obj.commission_percent
-        except Hotel.DoesNotExist:
-            comm_rate = 10.0
-        comm_amount = int(total * comm_rate / 100)
-        net_payout = total - comm_amount
-        data['commission_rate'] = comm_rate
-        data['commission_amount'] = comm_amount
-        data['net_partner_payout'] = net_payout
-        data['status'] = 'CONFIRMED'
-
-        # Snapshot number of nights at booking time so future room price changes
-        # don't alter the stored voucher figures
-        try:
-            from datetime import date as _date
-            ci = data.get('check_in')
-            co = data.get('check_out')
-            if isinstance(ci, str):
-                ci = _date.fromisoformat(ci)
-            if isinstance(co, str):
-                co = _date.fromisoformat(co)
-            data['nights'] = max(1, (co - ci).days)
-        except Exception:
-            data['nights'] = 1
-
-        serializer = BookingSerializer(data=data)
-        if serializer.is_valid():
-            booking = serializer.save()
-            # ── Send confirmation email with PDF voucher (non-blocking) ──────
-            try:
-                send_booking_confirmation(booking)
-            except Exception:
-                pass  # email failure must never break booking creation
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if not self._authenticated_user(request):
+            return Response({"error": "Login required."}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response(
+            {"error": "Bookings must be created through verified online checkout."},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED
+        )
 
     @staticmethod
     def _authenticated_user(request):
@@ -539,24 +675,115 @@ class BookingListCreateView(APIView):
         return UserProfile.objects.filter(auth_token=token, is_email_verified=True).first()
 
 class BookingCancelView(APIView):
-    def post(self, request, booking_id):
+    @staticmethod
+    def _customer_and_booking(request, booking_id, lock=False):
         user = BookingListCreateView._authenticated_user(request)
         if not user:
-            return Response({"error": "Login required."}, status=status.HTTP_401_UNAUTHORIZED)
+            return None, None, Response({"error": "Login required."}, status=status.HTTP_401_UNAUTHORIZED)
+        if user.role != 'CUSTOMER':
+            return None, None, Response({"error": "Only the booking owner can cancel this booking."}, status=status.HTTP_403_FORBIDDEN)
+
+        bookings = Booking.objects.select_related('hotel', 'room').filter(booking_id=booking_id, user=user)
+        if lock:
+            bookings = bookings.select_for_update()
         try:
-            booking = Booking.objects.get(booking_id=booking_id, user=user)
-            booking.status = 'CUSTOMER_CANCELLED'
-            booking.save()
-            refund_amount = int(booking.total_price * 0.9)
-            return Response({
-                "message": "Booking cancelled successfully",
-                "booking_id": booking.booking_id,
-                "status": "CUSTOMER_CANCELLED",
-                "refund_amount": refund_amount,
-                "cancellation_fee": booking.total_price - refund_amount
-            })
+            return user, bookings.get(), None
         except Booking.DoesNotExist:
-            return Response({"error": "Booking not found"}, status=status.HTTP_404_NOT_FOUND)
+            return None, None, Response({"error": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    @staticmethod
+    def _cancellation_quote(booking):
+        if booking.status in ('CUSTOMER_CANCELLED', 'PARTNER_CANCELLED'):
+            return {
+                "booking_id": booking.booking_id,
+                "status": booking.status,
+                "amount_paid": booking.total_price,
+                "refund_amount": booking.refund_amount,
+                "cancellation_fee": booking.cancellation_fee,
+                "refund_status": booking.refund_status,
+                "refund_estimated_days": CUSTOMER_REFUND_ETA if booking.refund_amount else None,
+                "already_cancelled": True,
+            }
+        if booking.status not in ('PENDING', 'CONFIRMED'):
+            return None
+        if booking.payment_status != 'SUCCESS':
+            return None
+
+        refund_amount, cancellation_fee = _customer_cancellation_amounts(booking)
+        return {
+            "booking_id": booking.booking_id,
+            "status": booking.status,
+            "amount_paid": booking.total_price,
+            "refund_amount": refund_amount,
+            "cancellation_fee": cancellation_fee,
+            "refund_status": booking.refund_status,
+            "refund_estimated_days": CUSTOMER_REFUND_ETA if refund_amount else None,
+            "policy": CUSTOMER_CANCELLATION_POLICY,
+            "already_cancelled": False,
+        }
+
+    def get(self, request, booking_id):
+        _, booking, error_response = self._customer_and_booking(request, booking_id)
+        if error_response:
+            return error_response
+        if booking.status in ('CUSTOMER_CANCELLED', 'PARTNER_CANCELLED'):
+            return Response(self._cancellation_quote(booking))
+        if booking.refund_status != 'NOT_APPLICABLE':
+            return Response(
+                {"error": "A refund request for this booking is already being reviewed. Please contact support."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        quote = self._cancellation_quote(booking)
+        if quote is None:
+            return Response(
+                {"error": "This booking cannot be cancelled because it is not confirmed or the payment is not complete."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(quote)
+
+    def post(self, request, booking_id):
+        with transaction.atomic():
+            _, booking, error_response = self._customer_and_booking(request, booking_id, lock=True)
+            if error_response:
+                return error_response
+            if booking.status in ('CUSTOMER_CANCELLED', 'PARTNER_CANCELLED'):
+                return Response(self._cancellation_quote(booking))
+            if booking.refund_status != 'NOT_APPLICABLE':
+                return Response(
+                    {"error": "A refund request for this booking is already being reviewed. Please contact support."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            quote = self._cancellation_quote(booking)
+            if quote is None:
+                return Response(
+                    {"error": "This booking cannot be cancelled because it is not confirmed or the payment is not complete."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            booking.status = 'CUSTOMER_CANCELLED'
+            booking.cancellation_fee = quote['cancellation_fee']
+            booking.refund_amount = quote['refund_amount']
+            if quote['refund_amount']:
+                booking.refund_status = 'PENDING'
+                booking.payment_status = 'REFUND_PENDING'
+            else:
+                booking.refund_status = 'NOT_APPLICABLE'
+            booking.payout_status = 'VOIDED'
+            booking.cancelled_at = timezone.now()
+            booking.save(update_fields=[
+                'status', 'cancellation_fee', 'refund_amount', 'refund_status',
+                'payment_status', 'payout_status', 'cancelled_at',
+            ])
+
+        booking.refresh_from_db()
+        email_notifications = send_booking_cancellation_notifications(booking)
+        result = self._cancellation_quote(booking)
+        result.update({
+            "message": "Booking cancelled successfully.",
+            "refund_estimated_days": CUSTOMER_REFUND_ETA if booking.refund_amount else None,
+            "email_notifications": email_notifications,
+        })
+        return Response(result)
 
 class ValidateCouponView(APIView):
     def post(self, request):
@@ -589,6 +816,11 @@ class ValidateCouponView(APIView):
             "discount_percent": coupon.discount_percent,
             "message": f"Coupon '{coupon.code}' applied! You saved ₹{final_discount}"
         })
+
+class ActiveCouponListView(APIView):
+    def get(self, request):
+        coupons = Coupon.objects.filter(is_active=True, is_admin_created=True).order_by('code')
+        return Response(CouponSerializer(coupons, many=True).data)
 
 class AdminAnalyticsView(APIView):
     def get(self, request):
@@ -649,31 +881,7 @@ class AdminHotelManageView(APIView):
         serializer = HotelSerializer(data=request.data)
         if serializer.is_valid():
             hotel = serializer.save()
-            if not hotel.rooms.exists():
-                Room.objects.create(
-                    hotel=hotel,
-                    room_type="Deluxe Suite",
-                    price_per_night=hotel.price_per_night,
-                    max_guests=2,
-                    bed_type="1 King Bed",
-                    available_count=8,
-                    total_rooms=10,
-                    blocked_rooms=0,
-                    status='ACTIVE',
-                    inclusions=["Breakfast Included", "Free High-Speed WiFi", "Swimming Pool Access"]
-                )
-                Room.objects.create(
-                    hotel=hotel,
-                    room_type="Executive Ocean Suite",
-                    price_per_night=int(hotel.price_per_night * 1.35),
-                    max_guests=3,
-                    bed_type="1 King Bed + Lounge",
-                    available_count=4,
-                    total_rooms=5,
-                    blocked_rooms=0,
-                    status='ACTIVE',
-                    inclusions=["Breakfast & Dinner Included", "Airport Private Transfer", "Spa & Sauna Access"]
-                )
+            _seed_default_rooms(hotel)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -702,6 +910,87 @@ class AdminHotelManageView(APIView):
         hotel.is_active = False
         hotel.save(update_fields=['is_active'])
         return Response({"message": "Hotel listing archived. Booking history has been retained."})
+
+
+class PartnerHotelRegisterView(APIView):
+    """List or register properties owned by the logged-in vendor."""
+
+    def get(self, request):
+        vendor, access_error = partner_access_user(request)
+        if access_error:
+            return access_error
+        hotels = _vendor_hotels_for_user(vendor).filter(is_active=True).order_by('-created_at')
+        return Response(HotelSerializer(hotels, many=True).data)
+
+    def post(self, request):
+        vendor, access_error = partner_access_user(request)
+        if access_error:
+            return access_error
+
+        payload = request.data.copy()
+        if not payload.get('destination') and payload.get('city'):
+            payload['destination'] = payload['city']
+        if payload.get('description') in (None, ''):
+            payload['description'] = f"Welcome to {payload.get('name', 'our property')}."
+
+        serializer = HotelSerializer(data=payload)
+        if not serializer.is_valid():
+            first_error = next(iter(serializer.errors.values()))[0]
+            if isinstance(first_error, dict):
+                first_error = next(iter(first_error.values()))[0]
+            return Response({"error": str(first_error), "details": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        hotel = serializer.save(is_active=True, owner=vendor)
+        _seed_default_rooms(hotel)
+
+        if not vendor.hotel_id:
+            vendor.hotel = hotel
+            vendor.save(update_fields=['hotel'])
+
+        data = HotelSerializer(hotel).data
+        data['vendor'] = UserProfileSerializer(vendor).data
+        return Response(data, status=status.HTTP_201_CREATED)
+
+
+class PartnerHotelDetailView(APIView):
+    """Remove (archive) a vendor-owned property listing."""
+
+    def delete(self, request, pk):
+        vendor, access_error = partner_access_user(request)
+        if access_error:
+            return access_error
+
+        try:
+            hotel = _vendor_hotels_for_user(vendor).get(pk=pk)
+        except Hotel.DoesNotExist:
+            return Response({"error": "Property not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
+
+        has_active_bookings = Booking.objects.filter(
+            hotel=hotel,
+            status__in=['PENDING', 'CONFIRMED', 'CHECKED_IN'],
+        ).exists()
+        if has_active_bookings:
+            return Response(
+                {"error": "This property has active bookings. Complete or cancel them before removing the listing."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        hotel.is_active = False
+        hotel.save(update_fields=['is_active'])
+
+        if vendor.hotel_id == hotel.id:
+            replacement = (
+                _vendor_hotels_for_user(vendor)
+                .filter(is_active=True)
+                .exclude(pk=hotel.id)
+                .order_by('-created_at')
+                .first()
+            )
+            vendor.hotel = replacement
+            vendor.save(update_fields=['hotel'])
+
+        return Response({"message": "Property removed from Trumitrip listings. Past booking records are retained."})
+
 
 class PartnerRatesView(APIView):
     def post(self, request):
@@ -762,14 +1051,53 @@ class PartnerRoomManageView(APIView):
 
 class PartnerBookingStatusView(APIView):
     def post(self, request, booking_id):
+        user = BookingListCreateView._authenticated_user(request)
+        if not user:
+            return Response({"error": "Login required."}, status=status.HTTP_401_UNAUTHORIZED)
+        if user.role != 'VENDOR' or user.vendor_status != 'APPROVED':
+            return Response({"error": "Approved vendor access is required."}, status=status.HTTP_403_FORBIDDEN)
+
         status_val = request.data.get('status', '').upper()
         allowed = ['CONFIRMED', 'CHECKED_IN', 'COMPLETED', 'PARTNER_CANCELLED']
         if status_val not in allowed:
             return Response({"error": f"Invalid status. Must be one of {allowed}"}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            booking = Booking.objects.get(booking_id=booking_id)
-            booking.status = status_val
-            booking.save(update_fields=['status'])
+            with transaction.atomic():
+                booking = Booking.objects.select_for_update().select_related('hotel', 'room', 'user').get(
+                    booking_id=booking_id,
+                    hotel__in=_vendor_hotels_for_user(user),
+                )
+                if booking.status in ('CUSTOMER_CANCELLED', 'PARTNER_CANCELLED', 'COMPLETED'):
+                    return Response({"error": "This booking can no longer be updated."}, status=status.HTTP_409_CONFLICT)
+                if status_val == 'PARTNER_CANCELLED':
+                    booking.status = 'PARTNER_CANCELLED'
+                    booking.cancellation_fee = 0
+                    booking.refund_amount = booking.total_price if booking.payment_status == 'SUCCESS' else 0
+                    booking.refund_status = 'PENDING' if booking.refund_amount else 'NOT_APPLICABLE'
+                    if booking.refund_amount:
+                        booking.payment_status = 'REFUND_PENDING'
+                    booking.payout_status = 'VOIDED'
+                    booking.cancelled_at = timezone.now()
+                    booking.save(update_fields=[
+                        'status', 'cancellation_fee', 'refund_amount', 'refund_status',
+                        'payment_status', 'payout_status', 'cancelled_at',
+                    ])
+                else:
+                    booking.status = status_val
+                    booking.save(update_fields=['status'])
+        except Booking.DoesNotExist:
+            return Response({"error": "Booking record not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if status_val == 'PARTNER_CANCELLED':
+            email_notifications = send_booking_cancellation_notifications(booking)
+            return Response({
+                "message": f"Booking {booking_id} cancelled. Any refund is pending admin processing.",
+                "booking": BookingSerializer(booking).data,
+                "email_notifications": email_notifications,
+            })
+
+        try:
+            booking = Booking.objects.select_related('hotel', 'room', 'user').get(booking_id=booking_id)
             return Response({
                 "message": f"Booking {booking_id} status updated to {status_val}",
                 "booking": BookingSerializer(booking).data
@@ -843,10 +1171,14 @@ class AdminPayoutsView(APIView):
             return access_error
         booking_id = request.data.get('booking_id')
         payout_status = request.data.get('payout_status', '').upper()
-        if payout_status not in ['PENDING', 'PROCESSED', 'TRANSFERRED']:
+        if payout_status not in ['PENDING', 'PROCESSED', 'TRANSFERRED', 'VOIDED']:
             return Response({"error": "Invalid payout status"}, status=status.HTTP_400_BAD_REQUEST)
         try:
             booking = Booking.objects.get(booking_id=booking_id)
+            if booking.status in ('CUSTOMER_CANCELLED', 'PARTNER_CANCELLED') and payout_status != 'VOIDED':
+                return Response({"error": "Cancelled bookings cannot be paid to a partner."}, status=status.HTTP_409_CONFLICT)
+            if booking.status not in ('CUSTOMER_CANCELLED', 'PARTNER_CANCELLED') and payout_status == 'VOIDED':
+                return Response({"error": "Only cancelled bookings can have a voided payout."}, status=status.HTTP_400_BAD_REQUEST)
             booking.payout_status = payout_status
             booking.save(update_fields=['payout_status'])
             return Response({
@@ -912,28 +1244,38 @@ class RazorpayVerifyPaymentView(APIView):
         razorpay_signature  = request.data.get('razorpay_signature', '')
         booking_payload     = request.data.get('booking_payload', {})
 
-        # ── Signature Verification ────────────────────────────────────────────
-        body = f"{razorpay_order_id}|{razorpay_payment_id}"
-        expected_signature = hmac.new(
-            settings.RAZORPAY_KEY_SECRET.encode('utf-8'),
-            body.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
-
-        if not hmac.compare_digest(expected_signature, razorpay_signature):
-            return Response({"error": "Payment verification failed. Invalid signature."}, status=status.HTTP_400_BAD_REQUEST)
+        # ── Signature Verification — use Razorpay's own utility ──────────────
+        try:
+            razorpay_client.utility.verify_payment_signature({
+                'razorpay_order_id':   razorpay_order_id,
+                'razorpay_payment_id': razorpay_payment_id,
+                'razorpay_signature':  razorpay_signature,
+            })
+        except Exception:
+            return Response(
+                {"error": "Payment verification failed. Invalid signature."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         # ── Create Booking ────────────────────────────────────────────────────
         data = booking_payload.copy()
         data['user'] = user.id
         data['guest_name'] = user.name
         data['guest_email'] = user.email
-        data['guest_phone'] = user.phone
-        data['payment_mode'] = 'CARD'
+        data['guest_phone'] = user.phone or str(data.get('guest_phone') or '').strip()
+        data['payment_mode'] = 'CARD'   # Razorpay online = CARD
         data['payment_status'] = 'SUCCESS'
         data['razorpay_order_id'] = razorpay_order_id
         data['razorpay_payment_id'] = razorpay_payment_id
         data['razorpay_signature'] = razorpay_signature
+
+        # Ensure hotel/room are integers
+        if 'hotel' in data:
+            try: data['hotel'] = int(data['hotel'])
+            except (ValueError, TypeError): pass
+        if 'room' in data:
+            try: data['room'] = int(data['room'])
+            except (ValueError, TypeError): pass
 
         if 'booking_id' not in data or not data['booking_id']:
             rand_suffix = ''.join(random.choices(string.digits, k=4))
@@ -968,14 +1310,11 @@ class RazorpayVerifyPaymentView(APIView):
         serializer = BookingSerializer(data=data)
         if serializer.is_valid():
             booking = serializer.save()
-            # ── Send confirmation email with PDF voucher ───────────────────
-            try:
-                send_booking_confirmation(booking)
-            except Exception:
-                pass
+            email_notifications = send_booking_notifications(booking)
             return Response({
                 "message": "Payment verified and booking confirmed!",
-                "booking": serializer.data
+                "booking": serializer.data,
+                "email_notifications": email_notifications,
             }, status=status.HTTP_201_CREATED)
         return Response({"error": "Booking creation failed.", "details": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1166,17 +1505,19 @@ class AdminResendVoucherView(APIView):
         booking.email_sent = False
         booking.save(update_fields=['email_sent'])
 
-        success = send_booking_confirmation(booking)
+        delivery = send_booking_notifications(booking)
 
-        if success:
+        if delivery['guest']:
             return Response({
-                "message": f"Confirmation email resent for booking {booking_id}.",
+                "message": f"Booking notifications retried for booking {booking_id}.",
                 "email_sent": True,
+                "email_notifications": delivery,
                 "email_attempts": booking.email_attempts,
             })
         else:
             return Response({
-                "error": "Email delivery failed. Check email configuration.",
+                "error": "Guest confirmation email delivery failed. Check the email server logs and SMTP configuration.",
                 "email_sent": False,
+                "email_notifications": delivery,
                 "email_attempts": booking.email_attempts,
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

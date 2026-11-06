@@ -7,12 +7,15 @@ confirmation PDF entirely from saved database values.
 import io
 import logging
 from datetime import date
+from pathlib import Path
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     HRFlowable,
     Paragraph,
@@ -37,6 +40,27 @@ BLACK  = colors.black
 
 PAGE_W, PAGE_H = A4
 MARGIN = 18 * mm
+
+
+def _register_currency_font():
+    font_pairs = (
+        (Path(r'C:\Windows\Fonts\segoeui.ttf'), Path(r'C:\Windows\Fonts\segoeuib.ttf')),
+        (Path('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'),
+         Path('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf')),
+        (Path('/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf'),
+         Path('/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf')),
+    )
+    for regular_path, bold_path in font_pairs:
+        if regular_path.is_file():
+            regular_name = 'TrumitripCurrency'
+            bold_name = 'TrumitripCurrencyBold'
+            pdfmetrics.registerFont(TTFont(regular_name, str(regular_path)))
+            pdfmetrics.registerFont(TTFont(bold_name, str(bold_path if bold_path.is_file() else regular_path)))
+            return regular_name, bold_name
+    return None, None
+
+
+CURRENCY_FONT, CURRENCY_BOLD_FONT = _register_currency_font()
 
 
 def _styles():
@@ -66,7 +90,7 @@ def _styles():
                          alignment=TA_CENTER),
         'policy':     ps('policy',     fontSize=7.5, textColor=DARK, fontName='Helvetica',
                          spaceAfter=3, leading=11),
-        'amount':     ps('amount',     fontSize=16, textColor=GREEN, fontName='Helvetica-Bold',
+        'amount':     ps('amount',     fontSize=16, textColor=GREEN, fontName=CURRENCY_BOLD_FONT or 'Helvetica-Bold',
                          alignment=TA_RIGHT),
     }
 
@@ -80,10 +104,11 @@ def _star_str(n):
 
 
 def _fmt_inr(amount):
+    currency = '₹' if CURRENCY_FONT else 'INR '
     try:
-        return f"₹{int(amount):,}"
+        return f"{currency}{int(amount):,}"
     except Exception:
-        return f"₹{amount}"
+        return f"{currency}{amount}"
 
 
 def _payment_status_color(status):
@@ -302,6 +327,7 @@ def generate_booking_pdf(booking) -> bytes:
         style_d = S['value_sm_b'] if is_total else S['value_sm']
         style_a = ParagraphStyle('fa', parent=S['value_sm_b'] if is_total else S['value_sm'],
                                  alignment=TA_RIGHT,
+                                 fontName=CURRENCY_BOLD_FONT or 'Helvetica-Bold',
                                  textColor=GREEN if is_total else DARK)
         fare_table_data.append([
             Paragraph(desc, style_d),
@@ -361,10 +387,9 @@ def generate_booking_pdf(booking) -> bytes:
     story.append(Paragraph('CANCELLATION & REFUND POLICY', S['section_hd']))
     story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#E2E8F0'), spaceAfter=2 * mm))
     story.append(Paragraph(
-        '• Cancellation before check-in: 10% cancellation fee applies; 90% refunded within 5–7 business days.\n'
-        '• No-show or cancellation on the day of check-in: full charge applies.\n'
-        '• For Pay-at-Hotel bookings, cancellation is free if done 24 hours before check-in.\n'
-        '• Trumitrip reserves the right to modify this policy at its discretion.',
+        '• Cancellation before check-in: 10% cancellation fee applies; the remaining 90% is refunded within 2–4 working days.\n'
+        '• Cancellation on or after check-in: no refund is due.\n'
+        '• Hotel-initiated cancellations receive a full refund within 2–4 working days.',
         S['policy'],
     ))
     story.append(Spacer(1, 3 * mm))
@@ -384,7 +409,7 @@ def generate_booking_pdf(booking) -> bytes:
     # ── FOOTER ───────────────────────────────────────────────────────────────
     story.append(HRFlowable(width='100%', thickness=1, color=GOLD, spaceAfter=3 * mm))
     story.append(Paragraph(
-        '24/7 Customer Support  ·  Toll Free: 1800-270-0297  ·  WhatsApp: +91 8470009000  ·  '
+        '24/7 Customer Support  ·  Call or WhatsApp: 8447151225  ·  '
         'support@trumitrip.com  ·  www.trumitrip.com',
         S['footer'],
     ))

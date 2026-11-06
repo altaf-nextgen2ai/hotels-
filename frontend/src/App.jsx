@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import Header from './components/Header';
 import HeroSearch from './components/HeroSearch';
 import WhyBookWithUs from './components/WhyBookWithUs';
@@ -17,41 +17,131 @@ import BecomePartnerPage from './components/BecomePartnerPage';
 import VendorLoginPage from './components/VendorLoginPage';
 import AdminLoginPage from './components/AdminLoginPage';
 import Footer from './components/Footer';
+import LansdowneSeoPage from './components/LansdowneSeoPage';
+import PolicyPage from './components/PolicyPage';
+import DestinationHotelsPage from './components/DestinationHotelsPage';
 import { apiService } from './services/api';
+import { getLansdowneSeoPage } from './data/lansdowneSeoPages';
+import { getPolicyPage } from './data/policyPages';
+import { getDestinationPage } from './data/destinationPages';
 import { Building2, SlidersHorizontal, X } from 'lucide-react';
+
+function getStoredUser() {
+  if (!localStorage.getItem('trumitrip_token')) return null;
+  try {
+    return JSON.parse(localStorage.getItem('trumitrip_user'));
+  } catch {
+    return null;
+  }
+}
+
+function isApprovedVendor(user) {
+  return user?.role === 'VENDOR' && user?.vendor_status === 'APPROVED';
+}
+
+/** Map URL + session to SPA view and canonical path (role-aware). */
+function resolveViewFromLocation(pathnameRaw, search, hash, user) {
+  const pathname = String(pathnameRaw || '/').toLowerCase();
+  const params = new URLSearchParams(search || '');
+  const viewParam = params.get('view');
+  const hashView = String(hash || '').replace('#', '').toLowerCase();
+
+  if (pathname.includes('/vendor-login') || viewParam === 'vendor-login' || hashView === 'vendor-login') {
+    return { view: 'vendor-login', canonicalPath: '/vendor-login' };
+  }
+  if (pathname.includes('/admin-login') || viewParam === 'admin-login' || hashView === 'admin-login') {
+    return { view: 'admin-login', canonicalPath: '/admin-login' };
+  }
+  if (pathname.includes('/become-partner') || viewParam === 'become-partner' || hashView === 'become-partner') {
+    return { view: 'become-partner', canonicalPath: '/become-partner' };
+  }
+
+  const policyPage = getPolicyPage(pathname);
+  if (policyPage) return { view: 'policy', canonicalPath: null, policyPage };
+
+  const destinationPage = getDestinationPage(pathname);
+  if (destinationPage) return { view: 'destination', canonicalPath: null, destinationPage };
+
+  const wantsPartner =
+    pathname.includes('/partner') ||
+    (pathname.includes('/vendor') && !pathname.includes('/vendor-login')) ||
+    viewParam === 'partner' ||
+    viewParam === 'vendor' ||
+    hashView === 'partner' ||
+    hashView === 'vendor';
+
+  if (wantsPartner) {
+    if (isApprovedVendor(user)) return { view: 'partner', canonicalPath: '/partner' };
+    if (user?.role === 'ADMIN') return { view: 'admin', canonicalPath: '/admin' };
+    return { view: 'vendor-login', canonicalPath: '/vendor-login' };
+  }
+
+  const wantsAdmin =
+    (pathname === '/admin' || pathname.startsWith('/admin/')) ||
+    viewParam === 'admin' ||
+    hashView === 'admin';
+
+  if (wantsAdmin) {
+    if (user?.role === 'ADMIN') return { view: 'admin', canonicalPath: '/admin' };
+    return { view: 'admin-login', canonicalPath: '/admin-login' };
+  }
+
+  if (getLansdowneSeoPage(pathname)) return { view: 'seo-landing', canonicalPath: null };
+
+  return { view: 'customer', canonicalPath: '/' };
+}
+
+function normalizePathForCompare(path) {
+  const p = String(path || '/').toLowerCase();
+  if (p.length > 1 && p.endsWith('/')) return p.slice(0, -1);
+  return p || '/';
+}
 
 export default function App() {
   // Current view: 'customer', 'admin', 'partner', 'become-partner', 'vendor-login', 'admin-login'
   const [currentView, setCurrentView] = useState(() => {
-    const savedUser = (() => {
-      try { return JSON.parse(localStorage.getItem('trumitrip_user')); } catch { return null; }
-    })();
-
-    const pathname = window.location.pathname.toLowerCase();
-    const params = new URLSearchParams(window.location.search);
-    const viewParam = params.get('view');
-    const hash = window.location.hash.replace('#', '').toLowerCase();
-
-    const isAdmin  = savedUser?.role === 'ADMIN';
-    const isVendor = savedUser?.role === 'VENDOR' && savedUser?.vendor_status === 'APPROVED';
-
-    // Dedicated login portals — always accessible
-    if (pathname.includes('/vendor-login') || viewParam === 'vendor-login' || hash === 'vendor-login') return 'vendor-login';
-    if (pathname.includes('/admin-login')  || viewParam === 'admin-login'  || hash === 'admin-login')  return 'admin-login';
-
-    if (pathname.includes('/become-partner') || viewParam === 'become-partner' || hash === 'become-partner') return 'become-partner';
-
-    // Protected views — only if already logged in with correct role
-    if (pathname.includes('/partner') || pathname.includes('/vendor') || viewParam === 'partner' || viewParam === 'vendor' || hash === 'partner' || hash === 'vendor') {
-      if (isAdmin) return 'admin'; // Admin goes to admin panel, not partner
-      return isVendor ? 'partner' : 'vendor-login';
-    }
-    if (pathname.includes('/admin') || viewParam === 'admin' || hash === 'admin') {
-      return isAdmin ? 'admin' : 'admin-login';
-    }
-
-    return 'customer';
+    const savedUser = getStoredUser();
+    return resolveViewFromLocation(
+      window.location.pathname,
+      window.location.search,
+      window.location.hash,
+      savedUser
+    ).view;
   });
+  const seoLandingPage = getLansdowneSeoPage(window.location.pathname);
+  const [activePolicyPage, setActivePolicyPage] = useState(() => getPolicyPage(window.location.pathname));
+  const [activeDestinationPage, setActiveDestinationPage] = useState(() => getDestinationPage(window.location.pathname));
+
+  const handleNavigatePath = useCallback((path) => {
+    const normalized = String(path || '/').trim();
+    if (normalized === '/' || normalized === '') {
+      setActivePolicyPage(null);
+      setActiveDestinationPage(null);
+      setCurrentView('customer');
+      window.history.pushState({ view: 'customer' }, '', '/');
+      window.scrollTo({ top: 0, behavior: 'auto' });
+      return;
+    }
+
+    const policy = getPolicyPage(normalized);
+    if (policy) {
+      setActivePolicyPage(policy);
+      setActiveDestinationPage(null);
+      setCurrentView('policy');
+      window.history.pushState({ view: 'policy', slug: policy.slug }, '', `/${policy.slug}/`);
+      window.scrollTo({ top: 0, behavior: 'auto' });
+      return;
+    }
+
+    const destination = getDestinationPage(normalized);
+    if (destination) {
+      setActiveDestinationPage(destination);
+      setActivePolicyPage(null);
+      setCurrentView('destination');
+      window.history.pushState({ view: 'destination', slug: destination.slug }, '', `/${destination.slug}/`);
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    }
+  }, []);
 
   // Sync browser address bar URL cleanly when switching views
   const handleNavigateView = (viewName, userOverride = currentUser) => {
@@ -79,18 +169,30 @@ export default function App() {
         return;
       }
     }
+    setActivePolicyPage(null);
+    setActiveDestinationPage(null);
     setCurrentView(viewName);
     const cleanPath = viewName === 'customer' ? '/' : `/${viewName}`;
     window.history.pushState({ view: viewName }, '', cleanPath);
+    window.scrollTo({ top: 0, behavior: 'auto' });
   };
 
   // Auth User State
   const [currentUser, setCurrentUser] = useState(() => {
     const saved = localStorage.getItem('trumitrip_user');
-    return saved ? JSON.parse(saved) : null;
+    if (!saved) return null;
+    try {
+      return JSON.parse(saved);
+    } catch {
+      localStorage.removeItem('trumitrip_user');
+      return null;
+    }
   });
 
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authPurpose, setAuthPurpose] = useState('general');
+  const [pendingBooking, setPendingBooking] = useState(null);
+  const pendingBookingRef = useRef(null);
 
   // Hotel data state
   const [hotels, setHotels] = useState([]);
@@ -124,13 +226,54 @@ export default function App() {
   const [userBookings, setUserBookings] = useState([]);
 
   // Mobile filter panel
-  const [showMobileFilter, setShowMobileFilter] = useState(false);
+  const [showMobileFilter, setShowMobileFilter] = useState(
+    () => window.matchMedia('(max-width: 767px)').matches
+  );
+  const [activeCoupons, setActiveCoupons] = useState([]);
+
+  const openAuthForBooking = useCallback((hotel, room, purpose = 'booking') => {
+    pendingBookingRef.current = { hotel, room };
+    setPendingBooking({ hotel, room });
+    setSelectedHotelForDetails(null);
+    setCheckoutHotel(null);
+    setCheckoutRoom(null);
+    setAuthPurpose(purpose);
+    setShowAuthModal(true);
+  }, []);
+
+  const closeAuthModal = useCallback(() => {
+    setShowAuthModal(false);
+    setAuthPurpose('general');
+  }, []);
+
+  const handleReauthPrompt = useCallback(() => {
+    setAuthPurpose('general');
+    setShowAuthModal(true);
+  }, []);
+
+  const isCustomerSession = (user) => user?.role === 'CUSTOMER';
 
   // Handle User Login & Automatic Dashboard Routing
-  const handleLoginSuccess = (userObj) => {
+  const handleLoginSuccess = (userObj, sessionToken) => {
+    if (sessionToken) localStorage.setItem('trumitrip_token', sessionToken);
     setCurrentUser(userObj);
     localStorage.setItem('trumitrip_user', JSON.stringify(userObj));
     setShowAuthModal(false);
+    setAuthPurpose('general');
+
+    const pending = pendingBookingRef.current;
+    if (pending && isCustomerSession(userObj)) {
+      pendingBookingRef.current = null;
+      setPendingBooking(null);
+      setCheckoutHotel(pending.hotel);
+      setCheckoutRoom(pending.room);
+      handleNavigateView('customer', userObj);
+      return;
+    }
+    if (pending && !isCustomerSession(userObj)) {
+      pendingBookingRef.current = null;
+      setPendingBooking(null);
+    }
 
     // Automatic role-based redirect
     if (userObj.role === 'ADMIN') {
@@ -146,12 +289,20 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     setCurrentUser(null);
     localStorage.removeItem('trumitrip_user');
     localStorage.removeItem('trumitrip_token');
     setCurrentView('customer');
-  };
+  }, [setCurrentUser, setCurrentView]);
+
+  const handleSessionExpired = useCallback(() => {
+    handleLogout();
+    setUserBookings([]);
+    setShowBookingsModal(false);
+    setAuthPurpose('general');
+    setShowAuthModal(true);
+  }, [handleLogout]);
 
   // Load hotels from Django API
   const loadHotelsData = async (params = {}) => {
@@ -171,6 +322,58 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    apiService.getActiveCoupons().then((coupons) => {
+      if (Array.isArray(coupons)) setActiveCoupons(coupons);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (currentView !== 'destination' || !activeDestinationPage) return;
+    loadHotelsData({ city: activeDestinationPage.city, search: activeDestinationPage.city });
+  }, [currentView, activeDestinationPage?.slug, activeDestinationPage?.city]);
+
+  const applyRouteFromBrowser = useCallback((userOverride) => {
+    const user = userOverride ?? currentUser ?? getStoredUser();
+    const resolved = resolveViewFromLocation(
+      window.location.pathname,
+      window.location.search,
+      window.location.hash,
+      user
+    );
+
+    if (resolved.policyPage) {
+      setActivePolicyPage(resolved.policyPage);
+      setActiveDestinationPage(null);
+    } else if (resolved.destinationPage) {
+      setActiveDestinationPage(resolved.destinationPage);
+      setActivePolicyPage(null);
+    } else if (resolved.view === 'customer' || resolved.view === 'seo-landing') {
+      setActivePolicyPage(null);
+      setActiveDestinationPage(null);
+    }
+
+    setCurrentView(resolved.view);
+
+    if (resolved.canonicalPath) {
+      const current = normalizePathForCompare(window.location.pathname);
+      const target = normalizePathForCompare(resolved.canonicalPath);
+      if (current !== target) {
+        window.history.replaceState({ view: resolved.view }, '', resolved.canonicalPath);
+      }
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    applyRouteFromBrowser();
+  }, [applyRouteFromBrowser]);
+
+  useEffect(() => {
+    const syncRouteFromBrowser = () => applyRouteFromBrowser();
+    window.addEventListener('popstate', syncRouteFromBrowser);
+    return () => window.removeEventListener('popstate', syncRouteFromBrowser);
+  }, [applyRouteFromBrowser]);
+
+  useEffect(() => {
     if (!currentUser) {
       setUserBookings([]);
       return;
@@ -187,6 +390,19 @@ export default function App() {
     loadHotelsData({ city: searchData.city, search: searchData.city });
     const element = document.getElementById('hotel-results-section');
     if (element) element.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const handleFooterCitySearch = (city) => {
+    handleNavigateView('customer');
+    const nextSearch = {
+      ...searchDetails,
+      city,
+    };
+    setSearchDetails(nextSearch);
+    loadHotelsData({ city, search: city });
+    window.setTimeout(() => {
+      document.getElementById('hotel-results-section')?.scrollIntoView({ behavior: 'smooth' });
+    }, 150);
   };
 
   // Filtered & Sorted Hotels — also searches address for area/locality names
@@ -218,8 +434,8 @@ export default function App() {
 
   // Booking flow: Book Room Now → Checkout form → Payment
   const handleBookRoomStart = (hotel, room) => {
-    if (!currentUser) {
-      setShowAuthModal(true);
+    if (!isCustomerSession(currentUser)) {
+      openAuthForBooking(hotel, room, 'booking');
       return;
     }
     setSelectedHotelForDetails(null);
@@ -228,6 +444,10 @@ export default function App() {
   };
 
   const handleProceedToPayment = (payload, hotel, room) => {
+    if (!isCustomerSession(currentUser)) {
+      openAuthForBooking(hotel, room, 'checkout');
+      return;
+    }
     setCheckoutHotel(null);
     setCheckoutRoom(null);
     setBookingPayloadForPayment(payload);
@@ -235,12 +455,22 @@ export default function App() {
     setPaymentRoom(room);
   };
 
-  const handleBookingSuccess = (newBooking) => {
-    setUserBookings([newBooking, ...userBookings]);
+  const handleCheckoutRequireLogin = () => {
+    if (checkoutHotel && checkoutRoom) {
+      openAuthForBooking(checkoutHotel, checkoutRoom, 'checkout');
+    }
   };
 
-  const handleCancelBooking = (bookingId) => {
-    setUserBookings(userBookings.map(b => b.booking_id === bookingId ? { ...b, status: 'CANCELLED' } : b));
+  const handleBookingSuccess = useCallback((newBooking) => {
+    setUserBookings((bookings) => [newBooking, ...bookings]);
+  }, []);
+
+  const handleCancelBooking = (cancellation) => {
+    setUserBookings((bookings) => bookings.map((booking) => (
+      booking.booking_id === cancellation.booking_id
+        ? { ...booking, ...cancellation }
+        : booking
+    )));
   };
 
   // Don't show Header/Footer on dedicated auth portals
@@ -253,16 +483,19 @@ export default function App() {
       {!isAuthPortal && (
       <Header 
         currentUser={currentUser}
-        onOpenAuth={() => setShowAuthModal(true)}
+        onOpenAuth={() => { setAuthPurpose('general'); setShowAuthModal(true); }}
         onLogout={handleLogout}
         onNavigateView={handleNavigateView}
-        bookingsCount={userBookings.filter(b => b.status !== 'CANCELLED').length}
-        onOpenBookings={() => currentUser ? setShowBookingsModal(true) : setShowAuthModal(true)}
+        bookingsCount={userBookings.filter(b => !String(b.status || '').includes('CANCELLED')).length}
+        onOpenBookings={() => {
+          if (currentUser) setShowBookingsModal(true);
+          else { setAuthPurpose('general'); setShowAuthModal(true); }
+        }}
         onOpenOffers={() => {
           const el = document.getElementById('offers-section');
           if (el) el.scrollIntoView({ behavior: 'smooth' });
         }}
-        onOpenSupport={() => alert('TRUMITRIP 24/7 Support Desk:\nToll Free: 1800-270-0297\nWhatsApp: +91 8470009000')}
+        onOpenSupport={() => alert(`TRUMITRIP 24/7 Support Desk:\nPhone: +91 8447151225\nEmail: support@trumitrip.com\nAddress: Deevika Tower, Chandan Nagar, Ghaziabad`)}
       />
       )}
 
@@ -270,7 +503,11 @@ export default function App() {
       {currentView === 'customer' && (
         <main className="flex-grow">
           {/* Hero Banner with Search Bar */}
-          <HeroSearch onSearch={handleSearch} hotels={hotels} />
+          <HeroSearch
+            onSearch={handleSearch}
+            hotels={hotels}
+            initialDestination={searchDetails.city}
+          />
 
           {/* Why Book With Us Section */}
           <WhyBookWithUs />
@@ -286,11 +523,14 @@ export default function App() {
           />
 
           {/* Special Offers Banner */}
-          <div id="offers-section">
-            <SpecialOffers 
-              onApplyOffer={(code) => alert(`Offer Code "${code}" copied! Enter at checkout.`)}
-            />
-          </div>
+          {activeCoupons.length > 0 && (
+            <div id="offers-section">
+              <SpecialOffers
+                coupons={activeCoupons}
+                onApplyOffer={(code) => alert(`Offer Code "${code}" copied! Enter at checkout.`)}
+              />
+            </div>
+          )}
 
           {/* Hotel Listings & Filters Section */}
           <section id="hotel-results-section" className="py-12 max-w-7xl mx-auto px-4 md:px-8">
@@ -308,27 +548,29 @@ export default function App() {
             <div className="md:hidden mb-4">
               <button
                 onClick={() => setShowMobileFilter(!showMobileFilter)}
+                aria-expanded={showMobileFilter}
+                aria-controls="mobile-hotel-filters"
                 className="flex items-center gap-2 bg-white border border-slate-200 shadow-sm text-slate-700 font-bold text-sm px-4 py-3 rounded-xl w-full justify-between min-h-[44px]"
               >
                 <span className="flex items-center gap-2">
                   <SlidersHorizontal className="w-4 h-4 text-[#D4AF37]" />
-                  Filters &amp; Sort
+                  Hotel Filters &amp; Sort
                   {(filters.starRating !== 'all' || filters.amenities.length > 0) && (
                     <span className="bg-[#D4AF37] text-slate-950 text-[10px] font-black px-1.5 py-0.5 rounded-full">
                       {(filters.starRating !== 'all' ? 1 : 0) + filters.amenities.length}
                     </span>
                   )}
                 </span>
-                {showMobileFilter
-                  ? <X className="w-4 h-4 text-slate-400" />
-                  : <span className="text-xs text-slate-400">{showMobileFilter ? 'Hide' : 'Show'}</span>
-                }
+                <span className="flex items-center gap-2 text-xs text-slate-500">
+                  {showMobileFilter ? 'Hide filters' : 'Show filters'}
+                  {showMobileFilter ? <X className="w-4 h-4" /> : <SlidersHorizontal className="w-4 h-4" />}
+                </span>
               </button>
             </div>
 
             {/* Mobile filter panel */}
             {showMobileFilter && (
-              <div className="md:hidden mb-4">
+              <div id="mobile-hotel-filters" className="md:hidden mb-4">
                 <HotelFilterSidebar 
                   filters={filters}
                   setFilters={setFilters}
@@ -355,7 +597,7 @@ export default function App() {
               </div>
 
               {/* Hotel Cards List */}
-              <div className="lg:col-span-8 space-y-4">
+              <div className="lg:col-span-8">
                 {loadingHotels ? (
                   <div className="text-center py-20 bg-white rounded-2xl border border-slate-200">
                     <div className="w-8 h-8 border-4 border-[#D4AF37] border-t-transparent rounded-full animate-spin mx-auto"></div>
@@ -368,19 +610,52 @@ export default function App() {
                     <p className="text-xs text-slate-500">Try adjusting your filters or price range.</p>
                   </div>
                 ) : (
-                  filteredHotels.map((hotel) => (
-                    <HotelCard 
-                      key={hotel.id}
-                      hotel={hotel}
-                      onSelectHotel={(h) => setSelectedHotelForDetails(h)}
-                    />
-                  ))
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {filteredHotels.map((hotel) => (
+                      <HotelCard
+                        key={hotel.id}
+                        hotel={hotel}
+                        layout="grid"
+                        onSelectHotel={(h) => setSelectedHotelForDetails(h)}
+                      />
+                    ))}
+                  </div>
                 )}
               </div>
 
             </div>
           </section>
         </main>
+      )}
+
+      {currentView === 'policy' && activePolicyPage && (
+        <PolicyPage page={activePolicyPage} onNavigatePath={handleNavigatePath} />
+      )}
+
+      {currentView === 'destination' && activeDestinationPage && (
+        <DestinationHotelsPage
+          page={activeDestinationPage}
+          hotels={hotels}
+          loading={loadingHotels}
+          onSelectHotel={setSelectedHotelForDetails}
+          onNavigatePath={handleNavigatePath}
+          onSearchCity={handleFooterCitySearch}
+        />
+      )}
+
+      {currentView === 'seo-landing' && seoLandingPage && (
+        <LansdowneSeoPage
+          page={seoLandingPage}
+          hotels={hotels}
+          loading={loadingHotels}
+          onSelectHotel={setSelectedHotelForDetails}
+          onSearch={() => {
+            handleNavigateView('customer');
+            setSearchDetails((current) => ({ ...current, city: 'Lansdowne' }));
+            loadHotelsData({ city: 'Lansdowne', search: 'Lansdowne' });
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        />
       )}
 
       {/* VIEW 2: ADMIN PANEL */}
@@ -428,14 +703,6 @@ export default function App() {
         />
       )}
 
-      {/* AUTH MODAL (Login / Signup) */}
-      {showAuthModal && (
-        <AuthModal 
-          onClose={() => setShowAuthModal(false)}
-          onLoginSuccess={handleLoginSuccess}
-        />
-      )}
-
       {/* MODALS */}
       {selectedHotelForDetails && (
         <HotelDetailsModal 
@@ -453,6 +720,7 @@ export default function App() {
           searchDetails={searchDetails}
           onClose={() => { setCheckoutHotel(null); setCheckoutRoom(null); }}
           onProceedToPayment={handleProceedToPayment}
+          onRequireLogin={handleCheckoutRequireLogin}
         />
       )}
 
@@ -472,11 +740,32 @@ export default function App() {
           userBookings={userBookings}
           onClose={() => setShowBookingsModal(false)}
           onCancelBooking={handleCancelBooking}
+          onRequireLogin={handleReauthPrompt}
+        />
+      )}
+
+      {/* AUTH MODAL — rendered last so it always sits above hotel/checkout/payment layers */}
+      {showAuthModal && (
+        <AuthModal
+          purpose={authPurpose}
+          pendingHotelName={pendingBooking?.hotel?.name}
+          pendingRoomType={pendingBooking?.room?.room_type}
+          onClose={closeAuthModal}
+          onLoginSuccess={handleLoginSuccess}
+          onOpenTerms={() => {
+            closeAuthModal();
+            handleNavigatePath('/terms-and-conditions/');
+          }}
         />
       )}
 
       {/* Footer — hidden on login portals */}
-      {!isAuthPortal && <Footer onNavigateView={handleNavigateView} />}
+      {!isAuthPortal && (
+        <Footer
+          onNavigateView={handleNavigateView}
+          onNavigatePath={handleNavigatePath}
+        />
+      )}
 
     </div>
   );

@@ -1,18 +1,12 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Mail, Lock, Eye, EyeOff, KeyRound, ArrowLeft, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, UserRound, Lock, Eye, EyeOff, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { apiService } from '../services/api';
 
-// Admin secret key — in production this would be an env variable / SSO
-// This is a secondary gate on top of email+password
-const ADMIN_SECRET = 'TRUMI-ADMIN-2026';
-
 export default function AdminLoginPage({ onLoginSuccess, onNavigateView }) {
-  const [email,      setEmail]      = useState('');
+  const [username,   setUsername]   = useState('');
   const [password,   setPassword]   = useState('');
-  const [secretKey,  setSecretKey]  = useState('');
   const [showPass,   setShowPass]   = useState(false);
-  const [showKey,    setShowKey]    = useState(false);
-  const [loading,    setLoading]    = useState(false);
+  const [loading,    setLoading]   = useState(false);
   const [error,      setError]      = useState('');
   const [attempts,   setAttempts]   = useState(0);
 
@@ -26,15 +20,8 @@ export default function AdminLoginPage({ onLoginSuccess, onNavigateView }) {
       return;
     }
 
-    // Secret key check FIRST (before hitting the API)
-    if (secretKey.trim() !== ADMIN_SECRET) {
-      setAttempts(a => a + 1);
-      setError('Invalid admin secret key. Access denied.');
-      return;
-    }
-
     setLoading(true);
-    const res = await apiService.login(email.trim().toLowerCase(), password);
+    const res = await apiService.login(username.trim(), password);
     setLoading(false);
 
     if (res?.error) {
@@ -54,7 +41,7 @@ export default function AdminLoginPage({ onLoginSuccess, onNavigateView }) {
 
     // Success — log access (in production, this would go to an audit log)
     console.info(`[ADMIN ACCESS] ${user.email} logged in at ${new Date().toISOString()}`);
-    onLoginSuccess(user);
+    onLoginSuccess(user, res.token);
   };
 
   const isLocked = attempts >= 5;
@@ -105,18 +92,18 @@ export default function AdminLoginPage({ onLoginSuccess, onNavigateView }) {
             )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Email */}
+              {/* Username */}
               <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5">Admin Email</label>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">Superuser Username</label>
                 <div className="flex items-center gap-2 bg-slate-900/80 border-2 border-slate-600 focus-within:border-[#D4AF37] rounded-xl px-3 py-2.5 transition">
-                  <Mail className="w-4 h-4 text-slate-500 shrink-0" />
+                  <UserRound className="w-4 h-4 text-slate-500 shrink-0" />
                   <input
-                    type="email"
+                    type="text"
                     required
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    placeholder="admin@trumitrip.com"
-                    autoComplete="off"
+                    value={username}
+                    onChange={e => setUsername(e.target.value)}
+                    placeholder="Django superuser username"
+                    autoComplete="username"
                     className="flex-1 bg-transparent text-sm font-semibold text-white placeholder-slate-600 focus:outline-none"
                   />
                 </div>
@@ -133,37 +120,13 @@ export default function AdminLoginPage({ onLoginSuccess, onNavigateView }) {
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     placeholder="Admin password"
-                    autoComplete="new-password"
+                    autoComplete="current-password"
                     className="flex-1 bg-transparent text-sm font-semibold text-white placeholder-slate-600 focus:outline-none"
                   />
                   <button type="button" onClick={() => setShowPass(!showPass)} className="text-slate-500 hover:text-slate-300 transition">
                     {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
-              </div>
-
-              {/* Secret Key */}
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5 flex items-center gap-1.5">
-                  <KeyRound className="w-3.5 h-3.5 text-[#D4AF37]" />
-                  Admin Secret Key
-                </label>
-                <div className="flex items-center gap-2 bg-slate-900/80 border-2 border-slate-600 focus-within:border-[#D4AF37] rounded-xl px-3 py-2.5 transition">
-                  <KeyRound className="w-4 h-4 text-slate-500 shrink-0" />
-                  <input
-                    type={showKey ? 'text' : 'password'}
-                    required
-                    value={secretKey}
-                    onChange={e => setSecretKey(e.target.value)}
-                    placeholder="Secret access key"
-                    autoComplete="off"
-                    className="flex-1 bg-transparent text-sm font-mono font-bold text-[#D4AF37] placeholder-slate-600 focus:outline-none"
-                  />
-                  <button type="button" onClick={() => setShowKey(!showKey)} className="text-slate-500 hover:text-slate-300 transition">
-                    {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-                <p className="text-[10px] text-slate-600 mt-1 font-medium">Provided by system administrator. Never share this key.</p>
               </div>
 
               {error && (
@@ -186,12 +149,10 @@ export default function AdminLoginPage({ onLoginSuccess, onNavigateView }) {
               </button>
             </form>
 
-            {/* Hint for dev */}
             <div className="border-t border-slate-700 pt-4 text-center">
-              <p className="text-[10px] text-slate-600 font-mono">
-                admin@trumitrip.com · admin123 · TRUMI-ADMIN-2026
+              <p className="text-[10px] text-slate-500">
+                Use a Django superuser created with <span className="font-mono">createsuperuser</span> and set its email address.
               </p>
-              <p className="text-[9px] text-slate-700 mt-0.5">Dev mode credentials — remove in production</p>
             </div>
           </div>
         )}

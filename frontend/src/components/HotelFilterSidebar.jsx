@@ -1,5 +1,5 @@
 import React from 'react';
-import { Filter, Star, SlidersHorizontal, RotateCcw } from 'lucide-react';
+import { Star, SlidersHorizontal, RotateCcw } from 'lucide-react';
 
 export default function HotelFilterSidebar({ filters, setFilters, onReset }) {
   const amenitiesList = ["WiFi", "Pool", "Spa", "Breakfast", "AC", "Ocean View", "Gym", "Parking"];

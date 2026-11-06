@@ -1,5 +1,10 @@
 const API_BASE_URL = 'http://127.0.0.1:8000/api';
 
+const authHeaders = (extra = {}) => ({
+  Authorization: `Bearer ${localStorage.getItem('trumitrip_token') || ''}`,
+  ...extra,
+});
+
 const adminRequest = async (path, { method = 'GET', body } = {}) => {
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -21,16 +26,17 @@ const adminRequest = async (path, { method = 'GET', body } = {}) => {
 
 export const apiService = {
   // Authentication APIs
-  async login(email, password) {
+  async login(identifier, password) {
     try {
       const response = await fetch(`${API_BASE_URL}/auth/login/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email: identifier, username: identifier, password })
       });
       const data = await response.json();
       if (!response.ok) return { error: data.error || 'Login failed' };
-      if (data.token) localStorage.setItem('trumitrip_token', data.token);
+      if (!data.token) return { error: 'Login succeeded but no session token was returned. Please try again.' };
+      localStorage.setItem('trumitrip_token', data.token);
       return data;
     } catch (error) {
       return { error: 'Backend unavailable. Please start the Django server and try again.' };
@@ -78,7 +84,7 @@ export const apiService = {
       return data;
     } catch (error) {
       console.warn('API Error (createVendor):', error);
-      return { vendor: { id: Date.now(), ...vendorData, role: 'VENDOR' } };
+      return { error: 'Backend unavailable. Please try submitting your application again.' };
     }
   },
 
@@ -116,6 +122,17 @@ export const apiService = {
     }
   },
 
+  async getActiveCoupons() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/coupons/active/`);
+      if (!response.ok) throw new Error('Failed to fetch active coupons');
+      return await response.json();
+    } catch (error) {
+      console.warn('API Error (getActiveCoupons):', error);
+      return [];
+    }
+  },
+
   // Fetch single hotel detail
   async getHotelDetail(id) {
     try {
@@ -128,30 +145,19 @@ export const apiService = {
     }
   },
 
-  // Create booking
-  async createBooking(bookingData) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/bookings/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('trumitrip_token') || ''}` },
-        body: JSON.stringify(bookingData)
-      });
-      if (!response.ok) throw new Error('Failed to create booking');
-      return await response.json();
-    } catch (error) {
-      return null;
-    }
-  },
-
   // Fetch user bookings
   async getBookings(email = '') {
     try {
       const response = await fetch(`${API_BASE_URL}/bookings/`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('trumitrip_token') || ''}` }
+        headers: authHeaders(),
       });
-      if (!response.ok) throw new Error('Failed to fetch bookings');
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        return { error: data.error || `Failed to fetch bookings (${response.status}).`, status: response.status };
+      }
       return await response.json();
     } catch (error) {
+      console.warn('API Error (getBookings):', error);
       return null;
     }
   },
@@ -161,13 +167,28 @@ export const apiService = {
     try {
       const response = await fetch(`${API_BASE_URL}/bookings/${bookingId}/cancel/`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
       });
-      if (!response.ok) throw new Error('Failed to cancel booking');
-      return await response.json();
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) return { error: data.error || `Cancellation failed (${response.status}).`, status: response.status };
+      return data;
     } catch (error) {
       console.warn('API Error (cancelBooking):', error);
-      return null;
+      return { error: 'Could not reach the server. Your booking has not been cancelled.' };
+    }
+  },
+
+  async getCancellationQuote(bookingId) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/bookings/${bookingId}/cancel/`, {
+        headers: authHeaders(),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) return { error: data.error || `Could not calculate cancellation (${response.status}).`, status: response.status };
+      return data;
+    } catch (error) {
+      console.warn('API Error (getCancellationQuote):', error);
+      return { error: 'Could not reach the server to calculate your cancellation refund.' };
     }
   },
 
@@ -219,6 +240,19 @@ export const apiService = {
     return adminRequest(`/admin/bookings/${encodeURIComponent(bookingId)}/`, {
       method: 'PATCH',
       body: { status }
+    });
+  },
+
+  async markAdminRefundProcessed(bookingId, refundReference) {
+    return adminRequest(`/admin/bookings/${encodeURIComponent(bookingId)}/refund/`, {
+      method: 'POST',
+      body: { refund_reference: refundReference }
+    });
+  },
+
+  async retryAdminBookingEmails(bookingId) {
+    return adminRequest(`/admin/resend-voucher/${encodeURIComponent(bookingId)}/`, {
+      method: 'POST'
     });
   },
 
@@ -304,9 +338,46 @@ export const apiService = {
   },
 
   // Create Hotel Property
+  async getPartnerHotels() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/partner/hotels/`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('trumitrip_token') || ''}`,
+        },
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        return { error: data?.error || `Could not load your properties (${response.status})` };
+      }
+      return data;
+    } catch (error) {
+      console.warn('API Error (getPartnerHotels):', error);
+      return { error: 'Backend unavailable.' };
+    }
+  },
+
+  async deletePartnerHotel(hotelId) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/partner/hotels/${hotelId}/`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('trumitrip_token') || ''}`,
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return { error: data.error || `Remove failed (${response.status})` };
+      }
+      return data;
+    } catch (error) {
+      console.warn('API Error (deletePartnerHotel):', error);
+      return { error: 'Backend unavailable.' };
+    }
+  },
+
   async createHotel(hotelData) {
     try {
-      const response = await fetch(`${API_BASE_URL}/admin/hotels/`, {
+      const response = await fetch(`${API_BASE_URL}/partner/hotels/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -314,10 +385,14 @@ export const apiService = {
         },
         body: JSON.stringify(hotelData)
       });
-      return await response.json();
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return { error: data.error || data.details || `Registration failed (${response.status})` };
+      }
+      return data;
     } catch (error) {
       console.warn('API Error (createHotel):', error);
-      return null;
+      return { error: 'Backend unavailable. Please start the Django server and try again.' };
     }
   },
 
@@ -386,7 +461,7 @@ export const apiService = {
     try {
       const response = await fetch(`${API_BASE_URL}/partner/bookings/${bookingId}/status/`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ status })
       });
       return await response.json();
@@ -475,8 +550,9 @@ export const apiService = {
         })
       });
       const data = await response.json();
-      if (!response.ok) return { error: data.error || 'Payment verification failed' };
-      return data; // { message, booking }
+      console.log('Verify API response status:', response.status, data);
+      if (!response.ok) return { error: data.error || 'Payment verification failed', details: data.details || data };
+      return data;
     } catch (error) {
       console.warn('API Error (verifyRazorpayPayment):', error);
       return { error: 'Backend unavailable. Please start the Django server and try again.' };
@@ -519,7 +595,8 @@ export const apiService = {
       });
       const data = await response.json();
       if (!response.ok) return { error: data.error || 'Google Sign-In failed' };
-      if (data.token) localStorage.setItem('trumitrip_token', data.token);
+      if (!data.token) return { error: 'Google Sign-In succeeded but no session token was returned. Please try again.' };
+      localStorage.setItem('trumitrip_token', data.token);
       return data; // { token, user: { id, name, email, role, ... } }
     } catch (error) {
       return { error: 'Backend unavailable. Please start the Django server and try again.' };

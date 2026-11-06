@@ -1,26 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Check, ShieldCheck, AlertCircle, Loader2, Printer, Moon } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { apiService } from '../services/api';
 
 export default function PaymentModal({ bookingPayload, hotel, room, onClose, onBookingSuccess }) {
-  if (!bookingPayload) return null;
-
   const [isProcessing,     setIsProcessing]     = useState(false);
   const [confirmedBooking, setConfirmedBooking] = useState(null);
   const [errorMsg,         setErrorMsg]         = useState('');
-
-  const nights = (() => {
-    try {
-      const n = Math.round((new Date(bookingPayload.check_out) - new Date(bookingPayload.check_in)) / 86400000);
-      return n >= 1 ? n : 1;
-    } catch { return 1; }
-  })();
-
-  const prettyDate = (d) => {
-    try { return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }); }
-    catch { return d; }
-  };
+  const didAutoOpenCheckout = useRef(false);
+  const paymentConfirmed = useRef(false);
 
   const loadRazorpayScript = () =>
     new Promise((resolve) => {
@@ -32,10 +20,8 @@ export default function PaymentModal({ bookingPayload, hotel, room, onClose, onB
       document.body.appendChild(s);
     });
 
-  // Auto-open Razorpay when modal mounts
-  useEffect(() => { openRazorpay(); }, []);
-
-  const openRazorpay = async () => {
+  const openRazorpay = useCallback(async () => {
+    if (!bookingPayload || paymentConfirmed.current) return;
     setIsProcessing(true);
     setErrorMsg('');
 
@@ -54,21 +40,21 @@ export default function PaymentModal({ bookingPayload, hotel, room, onClose, onB
     }
 
     const options = {
-      key:         orderData.key_id,
-      amount:      orderData.amount,
-      currency:    orderData.currency,
-      name:        'Trumitrip',
+      key: orderData.key_id,
+      amount: orderData.amount,
+      currency: orderData.currency,
+      name: 'Trumitrip',
       description: `${hotel.name} — ${room.room_type}`,
-      order_id:    orderData.razorpay_order_id,
+      order_id: orderData.razorpay_order_id,
       prefill: {
-        name:    bookingPayload.guest_name  || '',
-        email:   bookingPayload.guest_email || '',
+        name: bookingPayload.guest_name || '',
+        email: bookingPayload.guest_email || '',
         contact: bookingPayload.guest_phone || '',
       },
       theme: { color: '#D4AF37' },
-
       handler: async (response) => {
         setIsProcessing(true);
+        setErrorMsg('');
         const result = await apiService.verifyRazorpayPayment(
           response.razorpay_order_id,
           response.razorpay_payment_id,
@@ -76,70 +62,63 @@ export default function PaymentModal({ bookingPayload, hotel, room, onClose, onB
           bookingPayload,
         );
         setIsProcessing(false);
-        if (result?.error) { setErrorMsg(result.error); return; }
+        if (result?.error) {
+          const details = result.details && typeof result.details === 'object'
+            ? Object.entries(result.details).map(([field, messages]) => `${field}: ${Array.isArray(messages) ? messages.join(', ') : messages}`).join('; ')
+            : result.details;
+          setErrorMsg(details ? `${result.error} (${details})` : result.error);
+          return;
+        }
+        if (!result?.booking) {
+          setErrorMsg('Payment was received, but we could not confirm the booking. Please contact support with your payment reference.');
+          return;
+        }
 
-        const booking = result.booking || {
-          booking_id:          `TMT-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-          guest_name:          bookingPayload.guest_name,
-          guest_email:         bookingPayload.guest_email,
-          total_price:         bookingPayload.total_price,
-          payment_mode:        'RAZORPAY',
-          payment_status:      'SUCCESS',
-          status:              'CONFIRMED',
-          check_in:            bookingPayload.check_in,
-          check_out:           bookingPayload.check_out,
-          hotel_name:          hotel.name,
-          room_name:           room.room_type,
-          razorpay_payment_id: response.razorpay_payment_id,
+        const booking = {
+          ...result.booking,
+          email_notifications: result.email_notifications,
         };
+        paymentConfirmed.current = true;
         setConfirmedBooking(booking);
         onBookingSuccess(booking);
         confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 } });
       },
-
       modal: { ondismiss: () => setIsProcessing(false) },
     };
 
     const rzp = new window.Razorpay(options);
-    rzp.on('payment.failed', (r) => {
+    rzp.on('payment.failed', (response) => {
       setIsProcessing(false);
-      setErrorMsg(`Payment failed: ${r.error?.description || 'Unknown error'}`);
+      setErrorMsg(`Payment failed: ${response.error?.description || 'Unknown error'}`);
     });
     setIsProcessing(false);
     rzp.open();
-  };
+  }, [bookingPayload, hotel, onBookingSuccess, room]);
 
-  const handlePayAtHotel = async () => {
-    setIsProcessing(true);
-    setErrorMsg('');
-    const result = await apiService.createBooking({
-      ...bookingPayload,
-      payment_mode:   'PAY_AT_HOTEL',
-      payment_status: 'PENDING',
-    });
-    setIsProcessing(false);
+  useEffect(() => {
+    if (bookingPayload && !didAutoOpenCheckout.current) {
+      didAutoOpenCheckout.current = true;
+      openRazorpay();
+    }
+  }, [bookingPayload, openRazorpay]);
 
-    const booking = result || {
-      booking_id:     `TMT-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-      guest_name:     bookingPayload.guest_name,
-      guest_email:    bookingPayload.guest_email,
-      total_price:    bookingPayload.total_price,
-      payment_mode:   'PAY_AT_HOTEL',
-      payment_status: 'PENDING',
-      status:         'CONFIRMED',
-      check_in:       bookingPayload.check_in,
-      check_out:      bookingPayload.check_out,
-      hotel_name:     hotel.name,
-      room_name:      room.room_type,
-    };
-    setConfirmedBooking(booking);
-    onBookingSuccess(booking);
-    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+  if (!bookingPayload) return null;
+
+  const nights = (() => {
+    try {
+      const n = Math.round((new Date(bookingPayload.check_out) - new Date(bookingPayload.check_in)) / 86400000);
+      return n >= 1 ? n : 1;
+    } catch { return 1; }
+  })();
+
+  const prettyDate = (d) => {
+    try { return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }); }
+    catch { return d; }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl sm:rounded-3xl max-w-full sm:max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
+    <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto safe-area-bottom">
+      <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-full sm:max-w-md w-full max-h-[95dvh] sm:max-h-none shadow-2xl border border-slate-200 overflow-hidden overflow-y-auto">
 
         {/* Header */}
         <div className="bg-[#0A192F] px-6 py-4 flex justify-between items-center">
@@ -167,7 +146,7 @@ export default function PaymentModal({ bookingPayload, hotel, room, onClose, onB
                   <p className="text-sm font-extrabold text-[#D4AF37]">{hotel.name}</p>
                   <p className="text-[11px] text-slate-400 mt-0.5">{hotel.city} · {room.room_type}</p>
                 </div>
-                <span className="bg-emerald-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">CONFIRMED</span>
+                <span className="bg-amber-500/20 text-amber-300 text-[10px] font-black px-2 py-0.5 rounded-full">PAYMENT REQUIRED</span>
               </div>
               <div className="border-t border-slate-700 pt-2.5 grid grid-cols-2 gap-y-2 text-xs">
                 <div>
@@ -225,12 +204,6 @@ export default function PaymentModal({ bookingPayload, hotel, room, onClose, onB
                   <Check className="w-4 h-4" />
                   Pay ₹{bookingPayload.total_price?.toLocaleString('en-IN')} via Razorpay
                 </button>
-                <button
-                  onClick={handlePayAtHotel}
-                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold text-xs py-2.5 rounded-xl transition min-h-[44px]"
-                >
-                  Pay at Hotel instead
-                </button>
               </div>
             )}
 
@@ -248,7 +221,6 @@ export default function PaymentModal({ bookingPayload, hotel, room, onClose, onB
             <div>
               <span className="bg-emerald-100 text-emerald-800 text-xs font-black px-3 py-1 rounded-full uppercase">Booking Confirmed</span>
               <h3 className="text-xl font-black text-slate-900 mt-3">Thank You, {confirmedBooking.guest_name?.split(' ')[0]}!</h3>
-              <p className="text-xs text-slate-500 mt-1">Voucher PDF sent to <strong>{confirmedBooking.guest_email}</strong></p>
             </div>
             <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4 text-left space-y-3">
               <div className="flex justify-between pb-3 border-b border-slate-200">

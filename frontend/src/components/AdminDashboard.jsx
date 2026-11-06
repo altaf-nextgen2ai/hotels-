@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Archive, BadgeCheck, BarChart3, Building2, CalendarDays,
+  Archive, BadgeCheck, BarChart3, Building2, CalendarDays, Mail,
   CircleDollarSign, ClipboardList, Eye, Hotel, LoaderCircle, Pencil, Plus,
   RefreshCw, Search, ShieldCheck, Store, TicketPercent, Trash2, Users, X
 } from 'lucide-react';
@@ -66,10 +66,10 @@ function SelectField({ label, value, onChange, children }) {
   );
 }
 
-function Modal({ title, onClose, children }) {
+function Modal({ title, onClose, children, wide = false }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
-      <section className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-slate-700 bg-slate-800 p-5 text-white shadow-2xl sm:p-7">
+      <section className={`max-h-[92vh] w-full overflow-y-auto rounded-3xl border border-slate-700 bg-slate-800 p-5 text-white shadow-2xl sm:p-7 ${wide ? 'max-w-4xl' : 'max-w-2xl'}`}>
         <div className="mb-5 flex items-center justify-between gap-4">
           <h2 className="text-lg font-black">{title}</h2>
           <button type="button" onClick={onClose} aria-label="Close dialog" className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white">
@@ -236,6 +236,21 @@ export default function AdminDashboard({ onRefreshData }) {
     await showMutationResult(result, `Booking ${booking.booking_id} updated.`);
   };
 
+  const markRefundProcessed = async (booking) => {
+    const refundReference = window.prompt(
+      `After completing the refund manually, enter its payment/reference ID for ${booking.booking_id}.`
+    )?.trim();
+    if (!refundReference) return;
+    if (!window.confirm(`Confirm that ₹${Number(booking.refund_amount).toLocaleString('en-IN')} was refunded for ${booking.booking_id}?`)) return;
+    const result = await apiService.markAdminRefundProcessed(booking.booking_id, refundReference);
+    await showMutationResult(result, result?.message || `Refund for ${booking.booking_id} marked as processed.`);
+  };
+
+  const retryBookingEmails = async (booking) => {
+    const result = await apiService.retryAdminBookingEmails(booking.booking_id);
+    await showMutationResult(result, result?.message || 'Booking email retry completed.');
+  };
+
   const updatePayout = async (booking, payout_status) => {
     const result = await apiService.updateAdminPayoutSecure(booking.booking_id, payout_status);
     await showMutationResult(result, `Payout for ${booking.booking_id} updated.`);
@@ -274,40 +289,54 @@ export default function AdminDashboard({ onRefreshData }) {
   const maximumRevenue = Math.max(1, ...monthlyTrends.map((month) => Number(month.revenue || 0)));
 
   return (
-    <main className="admin-dashboard min-h-screen bg-[#f4f6fb] p-4 text-slate-100 md:p-8">
-      <div className="mx-auto max-w-7xl space-y-6">
-        <header className="flex flex-col justify-between gap-4 rounded-3xl border border-slate-700 bg-slate-800 p-5 shadow-xl md:flex-row md:items-center md:p-6">
-          <div className="flex items-center gap-3">
-            <div className="rounded-2xl bg-amber-400/10 p-3 text-amber-300"><ShieldCheck className="h-6 w-6" /></div>
-            <div>
-              <h1 className="text-xl font-black text-white md:text-2xl">TRUMITRIP Admin</h1>
-              <p className="mt-1 text-xs text-slate-400">Manage inventory, partners, reservations and payouts</p>
-            </div>
+    <main className="admin-dashboard min-h-screen bg-[#f4f6fb] p-0 text-slate-100">
+      <aside className="admin-sidebar">
+        <div className="admin-brand">
+          <div className="admin-brand-icon"><ShieldCheck className="h-6 w-6" /></div>
+          <div>
+            <p className="admin-brand-name">TRUMITRIP</p>
+            <p className="admin-brand-caption">ADMIN CONSOLE</p>
           </div>
-          <button type="button" onClick={reloadAll} disabled={loading} className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-700 px-4 py-2.5 text-xs font-bold text-white hover:bg-slate-600 disabled:opacity-60">
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh data
-          </button>
-        </header>
-
-        {(error || notice) && (
-          <div role="status" className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${error ? 'border-rose-500/30 bg-rose-500/10 text-rose-200' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'}`}>
-            <span>{error || notice}</span>
-            <button type="button" onClick={() => { setError(''); setNotice(''); }} aria-label="Dismiss message"><X className="h-4 w-4" /></button>
-          </div>
-        )}
-
-        <nav className="flex gap-2 overflow-x-auto rounded-2xl border border-slate-700 bg-slate-800 p-2">
+        </div>
+        <p className="admin-nav-heading">WORKSPACE</p>
+        <nav className="admin-nav" aria-label="Admin sections">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
               onClick={() => { setActiveTab(id); setSearch(''); }}
-              className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-bold transition md:px-4 ${activeTab === id ? 'bg-gradient-to-r from-amber-300 to-yellow-400 text-slate-950 shadow-lg shadow-amber-500/20 ring-1 ring-amber-200' : 'text-slate-300 hover:bg-slate-700/90 hover:text-white'}`}
+              aria-current={activeTab === id ? 'page' : undefined}
+              className={`admin-nav-item ${activeTab === id ? 'is-active' : ''}`}
             >
               <Icon className="h-4 w-4" /> {label}
             </button>
           ))}
         </nav>
+        <div className="admin-sidebar-footer">
+          <span className="admin-sidebar-status" />
+          <span>Management portal</span>
+        </div>
+      </aside>
+
+      <div className="admin-main">
+        <div className="admin-content">
+          <header className="admin-topbar">
+            <div>
+              <p className="admin-eyebrow">TRUMITRIP ADMIN</p>
+              <h1>{TABS.find((tab) => tab.id === activeTab)?.label}</h1>
+              <p className="admin-topbar-description">Manage inventory, partners, reservations and payouts</p>
+            </div>
+            <button type="button" onClick={reloadAll} disabled={loading} className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-700 px-4 py-2.5 text-xs font-bold text-white hover:bg-slate-600 disabled:opacity-60">
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh data
+            </button>
+          </header>
+
+          {(error || notice) && (
+            <div role="status" className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${error ? 'border-rose-500/30 bg-rose-500/10 text-rose-200' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'}`}>
+              <span>{error || notice}</span>
+              <button type="button" onClick={() => { setError(''); setNotice(''); }} aria-label="Dismiss message"><X className="h-4 w-4" /></button>
+            </div>
+          )}
 
         {loading && !analytics && (
           <div className="flex items-center justify-center gap-3 rounded-2xl border border-slate-700 bg-slate-800 p-12 text-slate-300">
@@ -457,7 +486,7 @@ export default function AdminDashboard({ onRefreshData }) {
             <div className="flex items-center justify-between gap-3 border-b border-slate-700 p-4"><div><h2 className="font-black text-white">Reservation management</h2><p className="mt-1 text-xs text-slate-400">Review guest, stay, payment and booking status.</p></div><span className="text-xs text-slate-400">{bookings.length} bookings</span></div>
             <table className="w-full min-w-[1000px] text-left text-xs">
               <thead className="bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400"><tr>
-                <th className="p-4">Reservation</th><th className="p-4">Guest</th><th className="p-4">Property / room</th><th className="p-4">Stay</th><th className="p-4">Payment</th><th className="p-4">Status</th>
+                <th className="p-4">Reservation</th><th className="p-4">Guest</th><th className="p-4">Property / room</th><th className="p-4">Stay</th><th className="p-4">Payment</th><th className="p-4">Cancellation / refund</th><th className="p-4">Emails</th><th className="p-4">Status</th>
               </tr></thead>
               <tbody className="divide-y divide-slate-700">
                 {bookings.map((booking) => (
@@ -467,9 +496,34 @@ export default function AdminDashboard({ onRefreshData }) {
                     <td className="p-4 text-slate-200">{booking.hotel_name}<p className="mt-1 text-slate-400">{booking.room_name}</p></td>
                     <td className="p-4 text-slate-300">{booking.check_in} → {booking.check_out}<p className="mt-1 text-slate-400">{booking.rooms_count} room(s), {booking.guests_count} guest(s)</p></td>
                     <td className="p-4 font-bold text-emerald-300">{money(booking.total_price)}<p className="mt-1 font-normal text-slate-400">{booking.payment_mode} · {booking.payment_status}</p></td>
+                    <td className="p-4 text-slate-300">{booking.status.includes('CANCELLED') ? (
+                      <>
+                        Fee: {money(booking.cancellation_fee)}
+                        <p className="mt-1">Refund: {money(booking.refund_amount)} · {booking.refund_status?.replaceAll('_', ' ')}</p>
+                        {['PENDING', 'REVIEW_REQUIRED'].includes(booking.refund_status) && booking.refund_amount > 0 && (
+                          <button type="button" onClick={() => markRefundProcessed(booking)} className="mt-2 rounded-lg bg-emerald-500 px-2.5 py-1.5 font-bold text-slate-950">
+                            Mark manually refunded
+                          </button>
+                        )}
+                        {booking.refund_reference && <p className="mt-1 text-slate-400">Ref: {booking.refund_reference}</p>}
+                      </>
+                    ) : booking.refund_status === 'REVIEW_REQUIRED' ? (
+                      <span className="font-bold text-rose-300">Refund requires review</span>
+                    ) : '—'}</td>
                     <td className="p-4">
-                      <select value={booking.status} onChange={(event) => updateBooking(booking, event.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-xs font-bold text-white">
-                        {['PENDING', 'CONFIRMED', 'CHECKED_IN', 'COMPLETED', 'CUSTOMER_CANCELLED', 'PARTNER_CANCELLED'].map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}
+                      {booking.status.includes('CANCELLED') ? (
+                        <span className="font-bold text-slate-400">Cancellation recorded</span>
+                      ) : booking.email_sent ? (
+                        <span className="font-bold text-emerald-300">Confirmation sent</span>
+                      ) : (
+                        <button type="button" onClick={() => retryBookingEmails(booking)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-400 px-3 py-2 font-bold text-slate-950">
+                          <Mail className="h-3.5 w-3.5" /> Retry email
+                        </button>
+                      )}
+                    </td>
+                    <td className="p-4">
+                      <select value={booking.status} disabled={booking.status.includes('CANCELLED')} onChange={(event) => updateBooking(booking, event.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-xs font-bold text-white disabled:opacity-60">
+                        {['PENDING', 'CONFIRMED', 'CHECKED_IN', 'COMPLETED', ...(booking.status.includes('CANCELLED') ? [booking.status] : [])].map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}
                       </select>
                     </td>
                   </tr>
@@ -526,6 +580,7 @@ export default function AdminDashboard({ onRefreshData }) {
             </div>
           </section>
         )}
+        </div>
       </div>
 
       {hotelForm && (
@@ -567,20 +622,65 @@ export default function AdminDashboard({ onRefreshData }) {
       )}
 
       {vendorProfile && (
-        <Modal title="Vendor profile" onClose={() => setVendorProfile(null)}>
-          <div className="space-y-5">
-            <div className="flex items-center gap-3 rounded-2xl bg-slate-900 p-4"><div className="rounded-xl bg-emerald-400/10 p-3 text-emerald-300"><Store className="h-5 w-5" /></div><div><h3 className="font-black">{vendorProfile.name}</h3><StatusPill positive={vendorProfile.vendor_status === 'APPROVED'}>{vendorProfile.vendor_status}</StatusPill></div></div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <ProfileValue label="Email" value={vendorProfile.email} />
-              <ProfileValue label="Phone" value={vendorProfile.phone || 'Not provided'} />
-              <ProfileValue label="Account role" value={vendorProfile.role} />
-              <ProfileValue label="Email verified" value={vendorProfile.is_email_verified ? 'Verified' : 'Not verified'} />
-              <ProfileValue label="Joined on" value={dateText(vendorProfile.created_at)} />
-              <ProfileValue label="Assigned hotel" value={vendorProfile.hotel_name || 'Not assigned'} />
-              <ProfileValue label="Hotel city" value={vendorProfile.hotel_city || '—'} />
-              <ProfileValue label="Hotel address" value={vendorProfile.hotel_address || '—'} />
+        <Modal title="Vendor profile" wide onClose={() => setVendorProfile(null)}>
+          <div className="space-y-6">
+            <div className="flex flex-col gap-4 rounded-2xl border border-slate-700 bg-slate-900/80 p-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-4">
+                <div className="rounded-2xl bg-emerald-400/10 p-3 text-emerald-300 ring-1 ring-emerald-400/20">
+                  <Store className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-white">{vendorProfile.name}</h3>
+                  <p className="mt-1 text-sm text-slate-400">{vendorProfile.email}</p>
+                </div>
+              </div>
+              <StatusPill positive={vendorProfile.vendor_status === 'APPROVED'}>{vendorProfile.vendor_status}</StatusPill>
             </div>
-            <div className="flex justify-end"><button type="button" onClick={() => { setVendorForm({ ...EMPTY_VENDOR, ...vendorProfile, password: '', hotel: vendorProfile.hotel || '' }); setVendorProfile(null); }} className="inline-flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-2.5 text-xs font-black text-slate-950"><Pencil className="h-4 w-4" /> Edit profile</button></div>
+
+            <ProfileSection title="Account">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <ProfileValue label="Phone" value={vendorProfile.phone || 'Not provided'} />
+                <ProfileValue label="Role" value={vendorProfile.role} />
+                <ProfileValue label="Email verified" value={vendorProfile.is_email_verified ? 'Verified' : 'Not verified'} />
+                <ProfileValue label="Joined on" value={dateText(vendorProfile.created_at)} />
+              </div>
+            </ProfileSection>
+
+            <ProfileSection title="Assigned property">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <ProfileValue label="Hotel name" value={vendorProfile.hotel_name || 'Not assigned'} />
+                <ProfileValue label="City" value={vendorProfile.hotel_city || '—'} />
+                <ProfileValue label="Address" className="sm:col-span-2" value={vendorProfile.hotel_address || '—'} />
+              </div>
+            </ProfileSection>
+
+            <ProfileSection title="Partner application">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <ProfileValue label="Applied property" value={vendorProfile.application_hotel_name || 'Not provided'} />
+                <ProfileValue label="Applied city" value={vendorProfile.application_city || 'Not provided'} />
+                <ProfileValue label="Room capacity" value={vendorProfile.application_total_rooms || 'Not provided'} />
+                <ProfileValue label="Applied address" className="sm:col-span-2" value={vendorProfile.application_address || 'Not provided'} />
+              </div>
+            </ProfileSection>
+
+            <div className="flex flex-col gap-3 border-t border-slate-700 pt-4 sm:flex-row sm:justify-end">
+              {vendorProfile.vendor_status !== 'APPROVED' && (
+                <button
+                  type="button"
+                  onClick={() => { updateVendorStatus(vendorProfile, 'APPROVED'); setVendorProfile(null); }}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-xs font-black text-slate-950"
+                >
+                  <BadgeCheck className="h-4 w-4" /> Approve &amp; email partner
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => { setVendorForm({ ...EMPTY_VENDOR, ...vendorProfile, password: '', hotel: vendorProfile.hotel || '' }); setVendorProfile(null); }}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-400 px-4 py-2.5 text-xs font-black text-slate-950"
+              >
+                <Pencil className="h-4 w-4" /> Edit profile
+              </button>
+            </div>
           </div>
         </Modal>
       )}
@@ -614,6 +714,20 @@ function EmptyState({ text }) {
   return <p className="p-8 text-center text-sm text-slate-400">{text}</p>;
 }
 
-function ProfileValue({ label, value }) {
-  return <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3"><p className="text-[10px] font-bold uppercase text-slate-500">{label}</p><p className="mt-1 break-words text-sm font-semibold text-slate-200">{value}</p></div>;
+function ProfileSection({ title, children }) {
+  return (
+    <section>
+      <h4 className="mb-3 text-[11px] font-black uppercase tracking-wider text-amber-300/90">{title}</h4>
+      {children}
+    </section>
+  );
+}
+
+function ProfileValue({ label, value, className = '' }) {
+  return (
+    <div className={`rounded-xl border border-slate-700/80 bg-slate-950/40 px-4 py-3 ${className}`}>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-1.5 break-words text-sm font-semibold leading-relaxed text-slate-100">{value}</p>
+    </div>
+  );
 }

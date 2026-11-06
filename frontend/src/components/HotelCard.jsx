@@ -1,7 +1,8 @@
 import React from 'react';
-import { Star, MapPin, Sparkles, ArrowRight, ShieldCheck, Flame, Tag, CheckCircle2, Gift } from 'lucide-react';
+import { Star, MapPin, Sparkles, ArrowRight, ShieldCheck, Flame, Gift } from 'lucide-react';
 
-export default function HotelCard({ hotel, onSelectHotel }) {
+export default function HotelCard({ hotel, onSelectHotel, layout = 'list' }) {
+  const isGrid = layout === 'grid';
   const discountPercent = Math.round(((hotel.original_price - hotel.price_per_night) / hotel.original_price) * 100);
 
   // Helper for Agoda-style rating category text
@@ -13,10 +14,10 @@ export default function HotelCard({ hotel, onSelectHotel }) {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden flex flex-col md:flex-row group relative md:h-[280px]">
+    <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden flex group relative ${isGrid ? 'h-full flex-col' : 'flex-col md:h-[280px] md:flex-row'}`}>
       
       {/* Image Banner Container */}
-      <div className="relative w-full h-48 md:w-2/5 md:h-full overflow-hidden shrink-0">
+      <div className={`relative w-full h-48 overflow-hidden shrink-0 ${isGrid ? 'sm:h-52' : 'md:h-full md:w-2/5'}`}>
         <img 
           src={hotel.main_image} 
           alt={hotel.name} 
@@ -54,7 +55,7 @@ export default function HotelCard({ hotel, onSelectHotel }) {
       </div>
 
       {/* Details Body */}
-      <div className="p-5 md:w-3/5 flex flex-col justify-between bg-slate-50/40">
+      <div className={`p-5 flex flex-1 flex-col justify-between bg-slate-50/40 ${isGrid ? '' : 'md:w-3/5'}`}>
         <div>
           {/* Top Info & Agoda Rating Badge */}
           <div className="flex justify-between items-start gap-3">
@@ -91,10 +92,6 @@ export default function HotelCard({ hotel, onSelectHotel }) {
             <span className="flex items-center gap-1">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
               FREE Cancellation
-            </span>
-            <span className="flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              Pay at Hotel Available
             </span>
           </div>
 
@@ -150,4 +147,3 @@ export default function HotelCard({ hotel, onSelectHotel }) {
     </div>
   );
 }
-

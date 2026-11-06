@@ -17,6 +17,13 @@ class Hotel(models.Model):
     is_featured = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     commission_percent = models.FloatField(default=10.0)  # Platform commission % per hotel (editable)
+    owner = models.ForeignKey(
+        'UserProfile',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='owned_hotels',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -67,6 +74,10 @@ class UserProfile(models.Model):
     auth_token = models.CharField(max_length=128, blank=True, default='')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='CUSTOMER')
     vendor_status = models.CharField(max_length=20, choices=VENDOR_STATUS_CHOICES, default='PENDING')
+    application_hotel_name = models.CharField(max_length=255, blank=True, default='')
+    application_city = models.CharField(max_length=100, blank=True, default='')
+    application_address = models.TextField(blank=True, default='')
+    application_total_rooms = models.PositiveIntegerField(default=0)
     hotel = models.ForeignKey(Hotel, on_delete=models.SET_NULL, null=True, blank=True, related_name='vendors')
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -78,7 +89,6 @@ class Booking(models.Model):
         ('UPI', 'UPI Payment'),
         ('CARD', 'Credit/Debit Card'),
         ('NETBANKING', 'Net Banking'),
-        ('PAY_AT_HOTEL', 'Pay at Hotel'),
     ]
 
     STATUS_CHOICES = [
@@ -94,6 +104,15 @@ class Booking(models.Model):
         ('PENDING', 'Pending Payout'),
         ('PROCESSED', 'Payout Processed'),
         ('TRANSFERRED', 'Transferred to Bank'),
+        ('VOIDED', 'Voided'),
+    ]
+
+    REFUND_STATUS_CHOICES = [
+        ('NOT_APPLICABLE', 'Not Applicable'),
+        ('PROCESSING', 'Processing'),
+        ('PENDING', 'Refund Pending'),
+        ('PROCESSED', 'Refund Processed'),
+        ('REVIEW_REQUIRED', 'Review Required'),
     ]
 
     booking_id = models.CharField(max_length=50, unique=True)
@@ -117,6 +136,11 @@ class Booking(models.Model):
     commission_amount = models.IntegerField(default=0) # Rupee amount retained by TRUMITRIP
     net_partner_payout = models.IntegerField(default=0) # Rupee amount payable to hotel partner
     payout_status = models.CharField(max_length=30, choices=PAYOUT_STATUS_CHOICES, default='PENDING')
+    cancellation_fee = models.PositiveIntegerField(default=0)
+    refund_amount = models.PositiveIntegerField(default=0)
+    refund_status = models.CharField(max_length=30, choices=REFUND_STATUS_CHOICES, default='NOT_APPLICABLE')
+    refund_reference = models.CharField(max_length=100, blank=True, default='')
+    cancelled_at = models.DateTimeField(null=True, blank=True)
     razorpay_order_id = models.CharField(max_length=100, blank=True, default='')  # Razorpay order ID
     razorpay_payment_id = models.CharField(max_length=100, blank=True, default='')  # Razorpay payment ID
     razorpay_signature = models.CharField(max_length=256, blank=True, default='')  # Razorpay signature
@@ -138,6 +162,7 @@ class Coupon(models.Model):
     max_discount = models.IntegerField(default=2000)
     min_order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    is_admin_created = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.code} ({self.discount_percent}%)"

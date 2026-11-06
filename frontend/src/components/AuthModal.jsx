@@ -5,7 +5,7 @@ import { apiService } from '../services/api';
 // ─── Your Google OAuth Client ID ──────────────────────────────────────────────
 const GOOGLE_CLIENT_ID = '173907682716-hshq5rj7cjcft2ffgg2q9o0c507b1ae2.apps.googleusercontent.com';
 
-export default function AuthModal({ onClose, onLoginSuccess }) {
+export default function AuthModal({ onClose, onLoginSuccess, onOpenTerms, purpose = 'general', pendingHotelName, pendingRoomType }) {
   const googleBtnRef = useRef(null);
   const [loading, setLoading]   = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -69,25 +69,34 @@ export default function AuthModal({ onClose, onLoginSuccess }) {
     }
 
     if (result?.user) {
-      onLoginSuccess(result.user);
+      onLoginSuccess(result.user, result.token);
     } else {
       setErrorMsg('Something went wrong. Please try again.');
     }
   };
 
+  const isBookingFlow = purpose === 'booking' || purpose === 'checkout';
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-6">
+    <div
+      className="fixed inset-0 z-[200] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-2 sm:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="auth-modal-title"
+    >
       <div className="bg-white rounded-none sm:rounded-3xl max-w-full sm:max-w-md w-full shadow-2xl border-0 sm:border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 overflow-y-auto max-h-screen sm:max-h-[calc(100vh-3rem)]">
 
         {/* Header */}
         <div className="bg-[#0A192F] px-6 py-5 flex justify-between items-start relative">
           <div>
             <p className="text-[11px] font-bold text-[#D4AF37] uppercase tracking-widest mb-1">TRUMITRIP</p>
-            <h2 className="text-2xl font-black text-white leading-tight">
-              Welcome Back
+            <h2 id="auth-modal-title" className="text-2xl font-black text-white leading-tight">
+              {isBookingFlow ? 'Sign in to continue booking' : 'Welcome Back'}
             </h2>
             <p className="text-slate-400 text-xs font-medium mt-1">
-              Sign in to manage bookings, view history &amp; get exclusive deals
+              {isBookingFlow
+                ? 'Login is required before payment. After sign-in, we will bring you back to checkout.'
+                : 'Sign in to manage bookings, view history & get exclusive deals'}
             </p>
           </div>
           <button
@@ -114,6 +123,19 @@ export default function AuthModal({ onClose, onLoginSuccess }) {
 
         {/* Body */}
         <div className="px-4 sm:px-6 py-6 sm:py-8 space-y-5">
+
+          {isBookingFlow && pendingHotelName && (
+            <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-4">
+              <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wider">Your selection</p>
+              <p className="text-sm font-extrabold text-slate-900 mt-1">{pendingHotelName}</p>
+              {pendingRoomType && (
+                <p className="text-xs text-slate-600 mt-0.5">{pendingRoomType}</p>
+              )}
+              <p className="text-[11px] text-blue-800 font-semibold mt-2">
+                Step 1 of 2 — Sign in · Step 2 — Complete checkout &amp; pay
+              </p>
+            </div>
+          )}
 
           {/* Error */}
           {errorMsg && (
@@ -178,7 +200,13 @@ export default function AuthModal({ onClose, onLoginSuccess }) {
           {/* Privacy note */}
           <p className="text-center text-[10px] text-slate-400 leading-relaxed">
             By continuing, you agree to Trumitrip's{' '}
-            <span className="text-amber-600 font-bold cursor-pointer hover:underline">Terms of Service</span>
+            <button
+              type="button"
+              onClick={() => onOpenTerms && onOpenTerms()}
+              className="text-amber-600 font-bold cursor-pointer hover:underline"
+            >
+              Terms of Service
+            </button>
             {' '}and{' '}
             <span className="text-amber-600 font-bold cursor-pointer hover:underline">Privacy Policy</span>.
             <br />We only access your name and email — nothing else.

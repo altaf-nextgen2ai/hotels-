@@ -41,14 +41,14 @@ export default function HotelDetailsModal({ hotel, onClose, onBookRoom }) {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95">
+    <div className="fixed inset-0 z-[100] bg-slate-950/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
+      <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-4xl w-full max-h-[92dvh] sm:max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95">
         
         {/* Top Header Bar */}
-        <div className="sticky top-0 z-20 bg-white/95 backdrop-blur-md px-6 py-4 border-b border-slate-100 flex justify-between items-center">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl font-extrabold text-slate-900">{hotel.name}</h2>
+        <div className="sticky top-0 z-20 bg-white/95 backdrop-blur-md px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-100 flex justify-between items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 truncate">{hotel.name}</h2>
               <div className="flex items-center gap-1 bg-amber-50 text-amber-700 text-xs font-bold px-2 py-0.5 rounded border border-amber-200">
                 <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
                 <span>{hotel.star_rating} Star</span>
@@ -71,7 +71,7 @@ export default function HotelDetailsModal({ hotel, onClose, onBookRoom }) {
         {/* ── Photo Gallery Carousel ── */}
         <div className="relative bg-slate-900 border-b border-slate-200">
           {/* Main image */}
-          <div className="relative h-64 md:h-96 overflow-hidden">
+          <div className="relative h-48 sm:h-64 md:h-96 overflow-hidden">
             {allPhotos.map((img, idx) => (
               <img
                 key={idx}
@@ -259,7 +259,7 @@ export default function HotelDetailsModal({ hotel, onClose, onBookRoom }) {
               </div>
               <ul className="space-y-2 list-disc pl-5">
                 <li>Valid Passport / Aadhar Card ID required at check-in.</li>
-                <li>Free cancellation available up to 24 hours prior to check-in.</li>
+                <li>Cancel before check-in for a 90% refund; a 10% cancellation fee applies.</li>
                 <li>Pets are not allowed in executive dining areas.</li>
                 <li>Unmarried couples allowed with valid government ID.</li>
               </ul>
