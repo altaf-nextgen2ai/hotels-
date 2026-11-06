@@ -106,6 +106,34 @@ class AdminUserProfilesViewTests(TestCase):
         self.assertNotIn('password', guest)
         self.assertNotIn('auth_token', guest)
 
+    def test_vendor_profile_shows_registered_hotel_even_if_profile_fk_missing(self):
+        vendor = UserProfile.objects.create(
+            name='Hotel Partner',
+            email='listed-partner@example.com',
+            password=make_password('vendor-password'),
+            role='VENDOR',
+            vendor_status='APPROVED',
+            is_email_verified=True,
+        )
+        Hotel.objects.create(
+            name='Grand Palace Hotel',
+            city='Bengaluru',
+            destination='Bengaluru',
+            address='MG Road',
+            price_per_night=5000,
+            original_price=7000,
+            main_image='https://example.com/hotel.jpg',
+            description='City hotel',
+            owner=vendor,
+        )
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer users-admin-token')
+        response = self.client.get('/api/admin/users/')
+        self.assertEqual(response.status_code, 200)
+        partner = next(item for item in response.data if item['email'] == 'listed-partner@example.com')
+        self.assertEqual(partner['hotel_name'], 'Grand Palace Hotel')
+        self.assertEqual(partner['hotel_city'], 'Bengaluru')
+        self.assertEqual(partner['owned_hotels'][0]['name'], 'Grand Palace Hotel')
+
     def test_customer_cannot_list_user_profiles(self):
         UserProfile.objects.create(
             name='No Access',
@@ -551,3 +579,10 @@ class PartnerHotelRegisterTests(TestCase):
         self.assertEqual(response.data['original_price'], 4500)
         self.assertEqual(response.data['owner'], self.vendor.id)
         self.assertTrue(Hotel.objects.filter(name='Sea View Inn', owner=self.vendor).exists())
+        self.vendor.refresh_from_db()
+        self.assertEqual(self.vendor.hotel_id, response.data['id'])
+        self.assertEqual(response.data['vendor']['hotel_name'], 'Sea View Inn')
+
+        public = self.client.get('/api/hotels/')
+        self.assertEqual(public.status_code, 200)
+        self.assertTrue(any(hotel['name'] == 'Sea View Inn' for hotel in public.data))

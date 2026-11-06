@@ -5,21 +5,49 @@ class UserProfileSerializer(serializers.ModelSerializer):
     hotel_name = serializers.SerializerMethodField()
     hotel_city = serializers.SerializerMethodField()
     hotel_address = serializers.SerializerMethodField()
+    owned_hotels = serializers.SerializerMethodField()
+
+    def _owned_hotels(self, user):
+        hotels = list(user.owned_hotels.all())
+        hotels.sort(key=lambda hotel: hotel.created_at, reverse=True)
+        active = [hotel for hotel in hotels if hotel.is_active]
+        return active or hotels
+
+    def _listing_hotel(self, user):
+        owned = self._owned_hotels(user)
+        if owned:
+            return owned[0]
+        if user.hotel_id:
+            try:
+                return user.hotel
+            except Hotel.DoesNotExist:
+                return None
+        return None
 
     def get_hotel_name(self, user):
-        return user.hotel.name if user.hotel_id else user.application_hotel_name
+        hotel = self._listing_hotel(user)
+        return hotel.name if hotel else user.application_hotel_name
 
     def get_hotel_city(self, user):
-        return user.hotel.city if user.hotel_id else user.application_city
+        hotel = self._listing_hotel(user)
+        return hotel.city if hotel else user.application_city
 
     def get_hotel_address(self, user):
-        return user.hotel.address if user.hotel_id else user.application_address
+        hotel = self._listing_hotel(user)
+        return hotel.address if hotel else user.application_address
+
+    def get_owned_hotels(self, user):
+        return [
+            {'id': hotel.id, 'name': hotel.name, 'city': hotel.city}
+            for hotel in self._owned_hotels(user)
+        ]
 
     class Meta:
         model = UserProfile
         fields = [
             'id', 'name', 'email', 'phone', 'role', 'vendor_status', 'hotel',
-            'hotel_name', 'hotel_city', 'hotel_address', 'application_hotel_name',
+            'hotel_name', 'hotel_city', 'hotel_address', 'owned_hotels',
+            'application_hotel_name',
             'application_city', 'application_address', 'application_total_rooms',
             'is_email_verified', 'created_at'
         ]

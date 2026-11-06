@@ -17,7 +17,7 @@ from django.db import transaction
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, generics
-from django.db.models import Q, Sum, Count
+from django.db.models import Q, Sum, Count, Prefetch
 from django.db.models.functions import TruncMonth
 from .models import Hotel, Room, Booking, Coupon, Review, UserProfile
 from .serializers import (
@@ -322,6 +322,12 @@ class AdminUserProfilesView(APIView):
             return access_error
         users = (
             UserProfile.objects.select_related('hotel')
+            .prefetch_related(
+                Prefetch(
+                    'owned_hotels',
+                    queryset=Hotel.objects.filter(is_active=True).order_by('-created_at'),
+                )
+            )
             .annotate(booking_count=Count('bookings'))
             .order_by('-created_at')
         )
@@ -980,9 +986,8 @@ class PartnerHotelRegisterView(APIView):
         hotel = serializer.save(is_active=True, owner=vendor)
         _seed_default_rooms(hotel)
 
-        if not vendor.hotel_id:
-            vendor.hotel = hotel
-            vendor.save(update_fields=['hotel'])
+        vendor.hotel = hotel
+        vendor.save(update_fields=['hotel'])
 
         data = HotelSerializer(hotel).data
         data['vendor'] = UserProfileSerializer(vendor).data

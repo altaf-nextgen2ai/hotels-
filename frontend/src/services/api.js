@@ -114,7 +114,9 @@ export const apiService = {
         }
       });
 
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: { Accept: 'application/json' },
+      });
       if (!response.ok) throw new Error('Failed to fetch hotels');
       return await response.json();
     } catch (error) {

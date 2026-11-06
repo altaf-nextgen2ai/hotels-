@@ -171,7 +171,7 @@ export default function AdminDashboard({ onRefreshData }) {
     const term = search.trim().toLowerCase();
     if (!term) return users;
     return users.filter((user) =>
-      [user.name, user.email, user.phone, user.role, user.vendor_status]
+      [user.name, user.email, user.phone, user.role, user.vendor_status, user.hotel_name]
         .some((value) => String(value || '').toLowerCase().includes(term))
     );
   }, [search, users]);
@@ -516,6 +516,7 @@ export default function AdminDashboard({ onRefreshData }) {
                     <th className="p-4">Email</th>
                     <th className="p-4">Phone</th>
                     <th className="p-4">Role</th>
+                    <th className="p-4">Property</th>
                     <th className="p-4">Verified</th>
                     <th className="p-4">Bookings</th>
                     <th className="p-4">Joined</th>
@@ -530,6 +531,10 @@ export default function AdminDashboard({ onRefreshData }) {
                       <td className="p-4 text-slate-400">{user.phone || '—'}</td>
                       <td className="p-4">
                         <StatusPill positive={user.role === 'CUSTOMER'}>{user.role}</StatusPill>
+                      </td>
+                      <td className="p-4 text-slate-300">
+                        {user.hotel_name || (user.role === 'VENDOR' ? 'Not assigned' : '—')}
+                        {user.hotel_city ? <p className="mt-1 text-slate-400">{user.hotel_city}</p> : null}
                       </td>
                       <td className="p-4 text-slate-300">{user.is_email_verified ? 'Yes' : 'No'}</td>
                       <td className="p-4 font-bold text-amber-200">{user.booking_count ?? 0}</td>
@@ -855,6 +860,14 @@ export default function AdminDashboard({ onRefreshData }) {
                   <ProfileValue label="Hotel name" value={userProfile.hotel_name || 'Not assigned'} />
                   <ProfileValue label="City" value={userProfile.hotel_city || '—'} />
                   <ProfileValue label="Address" className="sm:col-span-2" value={userProfile.hotel_address || '—'} />
+                  <div className="sm:col-span-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Registered properties</p>
+                    <p className="mt-1 text-sm font-semibold text-white">
+                      {(userProfile.owned_hotels || []).length
+                        ? userProfile.owned_hotels.map((hotel) => `${hotel.name} (${hotel.city})`).join(', ')
+                        : (userProfile.hotel_name || 'None yet')}
+                    </p>
+                  </div>
                 </div>
               </ProfileSection>
             )}
