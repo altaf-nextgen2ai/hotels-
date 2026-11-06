@@ -11,6 +11,7 @@ import BookingCheckoutModal from './components/BookingCheckoutModal';
 import PaymentModal from './components/PaymentModal';
 import UserAccountModal from './components/UserAccountModal';
 import SupportModal from './components/SupportModal';
+import OffersModal from './components/OffersModal';
 import AuthModal from './components/AuthModal';
 import AdminDashboard from './components/AdminDashboard';
 import PartnerPortal from './components/PartnerPortal';
@@ -225,6 +226,7 @@ export default function App() {
 
   const [showBookingsModal, setShowBookingsModal] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
+  const [showOffersModal, setShowOffersModal] = useState(false);
   const [userBookings, setUserBookings] = useState([]);
 
   // Mobile filter panel
@@ -493,10 +495,7 @@ export default function App() {
           if (currentUser) setShowBookingsModal(true);
           else { setAuthPurpose('general'); setShowAuthModal(true); }
         }}
-        onOpenOffers={() => {
-          const el = document.getElementById('offers-section');
-          if (el) el.scrollIntoView({ behavior: 'smooth' });
-        }}
+        onOpenOffers={() => setShowOffersModal(true)}
         onOpenSupport={() => setShowSupportModal(true)}
       />
       )}
@@ -525,14 +524,9 @@ export default function App() {
           />
 
           {/* Special Offers Banner */}
-          {activeCoupons.length > 0 && (
-            <div id="offers-section">
-              <SpecialOffers
-                coupons={activeCoupons}
-                onApplyOffer={(code) => alert(`Offer Code "${code}" copied! Enter at checkout.`)}
-              />
-            </div>
-          )}
+          <div id="offers-section">
+            <SpecialOffers />
+          </div>
 
           {/* Hotel Listings & Filters Section */}
           <section id="hotel-results-section" className="py-12 max-w-7xl mx-auto px-4 md:px-8">
@@ -750,6 +744,19 @@ export default function App() {
         <SupportModal
           onClose={() => setShowSupportModal(false)}
           onNavigatePath={handleNavigatePath}
+        />
+      )}
+
+      {showOffersModal && (
+        <OffersModal
+          onClose={() => setShowOffersModal(false)}
+          onGoHotels={() => {
+            setShowOffersModal(false);
+            handleNavigateView('customer');
+            window.setTimeout(() => {
+              document.getElementById('hotel-results-section')?.scrollIntoView({ behavior: 'smooth' });
+            }, 80);
+          }}
         />
       )}
 
