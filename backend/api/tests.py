@@ -72,6 +72,54 @@ class AdminSuperuserLoginTests(TestCase):
         )
 
 
+class AdminUserProfilesViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = UserProfile.objects.create(
+            name='Review Admin',
+            email='users-admin@example.com',
+            password=make_password('admin-password'),
+            role='ADMIN',
+            is_email_verified=True,
+            auth_token='users-admin-token',
+        )
+        UserProfile.objects.create(
+            name='Guest User',
+            email='guest@example.com',
+            phone='8447151225',
+            password=make_password('guest-password'),
+            role='CUSTOMER',
+            is_email_verified=True,
+        )
+
+    def test_admin_can_list_platform_user_profiles(self):
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer users-admin-token')
+        response = self.client.get('/api/admin/users/')
+        self.assertEqual(response.status_code, 200)
+        emails = [item['email'] for item in response.data]
+        self.assertIn('guest@example.com', emails)
+        guest = next(item for item in response.data if item['email'] == 'guest@example.com')
+        self.assertEqual(guest['name'], 'Guest User')
+        self.assertEqual(guest['phone'], '8447151225')
+        self.assertEqual(guest['role'], 'CUSTOMER')
+        self.assertEqual(guest['booking_count'], 0)
+        self.assertNotIn('password', guest)
+        self.assertNotIn('auth_token', guest)
+
+    def test_customer_cannot_list_user_profiles(self):
+        UserProfile.objects.create(
+            name='No Access',
+            email='no-access@example.com',
+            password=make_password('x'),
+            role='CUSTOMER',
+            is_email_verified=True,
+            auth_token='customer-token',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer customer-token')
+        response = self.client.get('/api/admin/users/')
+        self.assertEqual(response.status_code, 403)
+
+
 class ActiveCouponListViewTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -471,3 +519,35 @@ class RazorpayBookingCreationTests(TestCase):
         self.assertEqual(booking.payout_status, 'VOIDED')
         guest_email = next(message for message in mail.outbox if message.to == [self.user.email])
         self.assertIn('Full refund of ₹1,180', guest_email.body)
+
+
+class PartnerHotelRegisterTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.vendor = UserProfile.objects.create(
+            name='Approved Partner',
+            email='approved-partner@example.com',
+            password=make_password('vendor-password'),
+            role='VENDOR',
+            vendor_status='APPROVED',
+            is_email_verified=True,
+            auth_token='approved-partner-token',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer approved-partner-token')
+
+    def test_approved_vendor_can_register_hotel_when_original_price_is_blank(self):
+        response = self.client.post('/api/partner/hotels/', {
+            'name': 'Sea View Inn',
+            'city': 'Goa',
+            'address': 'Calangute Beach Road',
+            'price_per_night': '4500',
+            'original_price': '',
+            'star_rating': '4',
+            'main_image': 'data:image/png;base64,aaa',
+            'amenities': ['WiFi'],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['original_price'], 4500)
+        self.assertEqual(response.data['owner'], self.vendor.id)
+        self.assertTrue(Hotel.objects.filter(name='Sea View Inn', owner=self.vendor).exists())

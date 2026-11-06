@@ -24,6 +24,13 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'is_email_verified', 'created_at'
         ]
 
+
+class AdminUserListSerializer(UserProfileSerializer):
+    booking_count = serializers.IntegerField(read_only=True)
+
+    class Meta(UserProfileSerializer.Meta):
+        fields = UserProfileSerializer.Meta.fields + ['booking_count']
+
 class RoomSerializer(serializers.ModelSerializer):
     class Meta:
         model = Room
@@ -41,6 +48,47 @@ class HotelSerializer(serializers.ModelSerializer):
     class Meta:
         model = Hotel
         fields = '__all__'
+
+
+class PartnerHotelWriteSerializer(serializers.ModelSerializer):
+    price_per_night = serializers.IntegerField(min_value=1)
+    original_price = serializers.IntegerField(required=False, allow_null=True, min_value=0)
+
+    class Meta:
+        model = Hotel
+        fields = [
+            'name', 'city', 'destination', 'address', 'star_rating',
+            'rating_score', 'review_count', 'price_per_night', 'original_price',
+            'main_image', 'gallery_images', 'amenities', 'description',
+            'is_featured', 'commission_percent',
+        ]
+        extra_kwargs = {
+            'destination': {'required': False, 'allow_blank': True},
+            'description': {'required': False, 'allow_blank': True},
+            'main_image': {'required': True, 'allow_blank': False},
+            'gallery_images': {'required': False},
+            'amenities': {'required': False},
+            'original_price': {'required': False},
+            'rating_score': {'required': False},
+            'review_count': {'required': False},
+            'star_rating': {'required': False},
+            'commission_percent': {'required': False},
+            'is_featured': {'required': False},
+        }
+
+    def validate_original_price(self, value):
+        if value in (None, ''):
+            return 0
+        return int(value)
+
+    def validate(self, attrs):
+        if not attrs.get('original_price'):
+            attrs['original_price'] = int(attrs.get('price_per_night') or 0)
+        if not attrs.get('destination'):
+            attrs['destination'] = attrs.get('city') or ''
+        if not (attrs.get('description') or '').strip():
+            attrs['description'] = f"Welcome to {attrs.get('name', 'our property')}."
+        return attrs
 
 class BookingSerializer(serializers.ModelSerializer):
     hotel_name = serializers.CharField(source='hotel.name', read_only=True)

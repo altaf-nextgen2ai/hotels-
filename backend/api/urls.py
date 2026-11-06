@@ -3,7 +3,7 @@ from .views import (
     HotelListView, HotelDetailView, BookingListCreateView, 
     BookingCancelView, ValidateCouponView, ActiveCouponListView, AdminAnalyticsView,
     AdminHotelManageView, AdminVendorManageView, AdminBookingManageView, AdminManualRefundView,
-    AdminCouponManageView,     PartnerRatesView, PartnerRoomManageView,
+    AdminCouponManageView, AdminUserProfilesView, PartnerRatesView, PartnerRoomManageView,
     PartnerBookingStatusView, PartnerAnalyticsView, AdminPayoutsView, PartnerHotelRegisterView, PartnerHotelDetailView,
     SignupView, VerifySignupView, LoginView, CreateVendorView, ListVendorsView, AdminVendorStatusView,
     RazorpayCreateOrderView, RazorpayVerifyPaymentView, AdminCommissionSettingsView,
@@ -33,6 +33,7 @@ urlpatterns = [
     path('admin/coupons/<int:pk>/', AdminCouponManageView.as_view(), name='admin-coupon-update-delete'),
     path('admin/payouts/', AdminPayoutsView.as_view(), name='admin-payouts'),
     path('admin/commission/', AdminCommissionSettingsView.as_view(), name='admin-commission'),
+    path('admin/users/', AdminUserProfilesView.as_view(), name='admin-user-profiles'),
 
     # Hotels & Bookings
     path('hotels/', HotelListView.as_view(), name='hotel-list'),

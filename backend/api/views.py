@@ -20,7 +20,16 @@ from rest_framework import status, generics
 from django.db.models import Q, Sum, Count
 from django.db.models.functions import TruncMonth
 from .models import Hotel, Room, Booking, Coupon, Review, UserProfile
-from .serializers import HotelSerializer, RoomSerializer, BookingSerializer, CouponSerializer, ReviewSerializer, UserProfileSerializer
+from .serializers import (
+    AdminUserListSerializer,
+    HotelSerializer,
+    PartnerHotelWriteSerializer,
+    RoomSerializer,
+    BookingSerializer,
+    CouponSerializer,
+    ReviewSerializer,
+    UserProfileSerializer,
+)
 from .services.email_service import (
     send_booking_cancellation_notifications,
     send_booking_notifications,
@@ -305,6 +314,19 @@ class CreateVendorView(APIView):
             "token": vendor.auth_token,
             "vendor": serializer.data
         }, status=status.HTTP_201_CREATED)
+
+class AdminUserProfilesView(APIView):
+    def get(self, request):
+        access_error = admin_access_error(request)
+        if access_error:
+            return access_error
+        users = (
+            UserProfile.objects.select_related('hotel')
+            .annotate(booking_count=Count('bookings'))
+            .order_by('-created_at')
+        )
+        return Response(AdminUserListSerializer(users, many=True).data)
+
 
 class ListVendorsView(APIView):
     def get(self, request):
@@ -927,17 +949,32 @@ class PartnerHotelRegisterView(APIView):
         if access_error:
             return access_error
 
-        payload = request.data.copy()
-        if not payload.get('destination') and payload.get('city'):
-            payload['destination'] = payload['city']
-        if payload.get('description') in (None, ''):
-            payload['description'] = f"Welcome to {payload.get('name', 'our property')}."
+        payload = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+        for key in ('price_per_night', 'original_price', 'star_rating', 'review_count'):
+            value = payload.get(key)
+            if value in ('', None):
+                payload.pop(key, None)
+            else:
+                try:
+                    payload[key] = int(float(value))
+                except (TypeError, ValueError):
+                    payload.pop(key, None)
+        if payload.get('rating_score') not in ('', None):
+            try:
+                payload['rating_score'] = float(payload['rating_score'])
+            except (TypeError, ValueError):
+                payload.pop('rating_score', None)
 
-        serializer = HotelSerializer(data=payload)
+        serializer = PartnerHotelWriteSerializer(data=payload)
         if not serializer.is_valid():
-            first_error = next(iter(serializer.errors.values()))[0]
-            if isinstance(first_error, dict):
-                first_error = next(iter(first_error.values()))[0]
+            first_error = 'Invalid hotel details.'
+            for field, messages in serializer.errors.items():
+                if isinstance(messages, (list, tuple)) and messages:
+                    first_error = f"{field}: {messages[0]}"
+                    break
+                if messages:
+                    first_error = f"{field}: {messages}"
+                    break
             return Response({"error": str(first_error), "details": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         hotel = serializer.save(is_active=True, owner=vendor)

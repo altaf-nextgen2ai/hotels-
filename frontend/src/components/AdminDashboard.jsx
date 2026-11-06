@@ -2,14 +2,16 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Archive, BadgeCheck, BarChart3, Building2, CalendarDays, Mail,
   CircleDollarSign, ClipboardList, Eye, Hotel, LoaderCircle, Pencil, Plus,
-  RefreshCw, Search, ShieldCheck, Store, TicketPercent, Trash2, Users, X
+  RefreshCw, Search, ShieldCheck, Store, TicketPercent, Trash2, UserRound, Users, X
 } from 'lucide-react';
 import { apiService } from '../services/api';
+import { compressImageFile, compressImageFiles } from '../utils/compressImage';
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: BarChart3 },
   { id: 'hotels', label: 'Hotels', icon: Hotel },
   { id: 'vendors', label: 'Vendors', icon: Store },
+  { id: 'users', label: 'User profiles', icon: UserRound },
   { id: 'bookings', label: 'Bookings', icon: CalendarDays },
   { id: 'payouts', label: 'Payouts', icon: CircleDollarSign },
   { id: 'coupons', label: 'Coupons', icon: TicketPercent }
@@ -95,6 +97,7 @@ export default function AdminDashboard({ onRefreshData }) {
   const [analytics, setAnalytics] = useState(null);
   const [hotels, setHotels] = useState([]);
   const [vendors, setVendors] = useState([]);
+  const [users, setUsers] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [payouts, setPayouts] = useState([]);
   const [coupons, setCoupons] = useState([]);
@@ -108,26 +111,29 @@ export default function AdminDashboard({ onRefreshData }) {
   const [vendorForm, setVendorForm] = useState(null);
   const [couponForm, setCouponForm] = useState(null);
   const [vendorProfile, setVendorProfile] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
 
   const reloadAll = useCallback(async () => {
     setLoading(true);
     setError('');
-    const [analyticsResult, hotelsResult, vendorsResult, bookingsResult, payoutsResult, couponsResult, commissionsResult] = await Promise.all([
+    const [analyticsResult, hotelsResult, vendorsResult, usersResult, bookingsResult, payoutsResult, couponsResult, commissionsResult] = await Promise.all([
       apiService.getAdminAnalytics(),
       apiService.getAdminHotels(),
       apiService.getAdminVendors(),
+      apiService.getAdminUsers(),
       apiService.getAdminBookings(),
       apiService.getAdminPayoutsSecure(),
       apiService.getAdminCouponsSecure(),
       apiService.getAdminCommissionsSecure()
     ]);
 
-    const results = [analyticsResult, hotelsResult, vendorsResult, bookingsResult, payoutsResult, couponsResult, commissionsResult];
+    const results = [analyticsResult, hotelsResult, vendorsResult, usersResult, bookingsResult, payoutsResult, couponsResult, commissionsResult];
     const firstError = results.find((result) => result?.error)?.error;
     if (firstError) setError(firstError);
     if (analyticsResult && !analyticsResult.error) setAnalytics(analyticsResult);
     if (Array.isArray(hotelsResult)) setHotels(hotelsResult);
     if (Array.isArray(vendorsResult)) setVendors(vendorsResult);
+    if (Array.isArray(usersResult)) setUsers(usersResult);
     if (Array.isArray(bookingsResult)) setBookings(bookingsResult);
     if (Array.isArray(payoutsResult)) setPayouts(payoutsResult);
     if (Array.isArray(couponsResult)) setCoupons(couponsResult);
@@ -160,6 +166,15 @@ export default function AdminDashboard({ onRefreshData }) {
         .some((value) => String(value || '').toLowerCase().includes(term))
     );
   }, [search, vendors]);
+
+  const filteredUsers = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return users;
+    return users.filter((user) =>
+      [user.name, user.email, user.phone, user.role, user.vendor_status]
+        .some((value) => String(value || '').toLowerCase().includes(term))
+    );
+  }, [search, users]);
 
   const filteredHotels = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -481,6 +496,58 @@ export default function AdminDashboard({ onRefreshData }) {
           </section>
         )}
 
+        {activeTab === 'users' && (
+          <section className="space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="font-black text-white">User profiles</h2>
+                <p className="mt-1 text-xs text-slate-400">Everyone who signed up or logged in — customers, partners, and admins.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-400">{filteredUsers.length} of {users.length} users</span>
+                <SearchBox value={search} onChange={setSearch} />
+              </div>
+            </div>
+            <div className="overflow-x-auto rounded-2xl border border-slate-700 bg-slate-800">
+              <table className="w-full min-w-[860px] text-left text-xs">
+                <thead className="bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
+                  <tr>
+                    <th className="p-4">Name</th>
+                    <th className="p-4">Email</th>
+                    <th className="p-4">Phone</th>
+                    <th className="p-4">Role</th>
+                    <th className="p-4">Verified</th>
+                    <th className="p-4">Bookings</th>
+                    <th className="p-4">Joined</th>
+                    <th className="p-4">Profile</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-700">
+                  {filteredUsers.map((user) => (
+                    <tr key={user.id} className="hover:bg-slate-700/30">
+                      <td className="p-4 font-bold text-white">{user.name}</td>
+                      <td className="p-4 text-slate-300">{user.email}</td>
+                      <td className="p-4 text-slate-400">{user.phone || '—'}</td>
+                      <td className="p-4">
+                        <StatusPill positive={user.role === 'CUSTOMER'}>{user.role}</StatusPill>
+                      </td>
+                      <td className="p-4 text-slate-300">{user.is_email_verified ? 'Yes' : 'No'}</td>
+                      <td className="p-4 font-bold text-amber-200">{user.booking_count ?? 0}</td>
+                      <td className="p-4 text-slate-400">{dateText(user.created_at)}</td>
+                      <td className="p-4">
+                        <button type="button" onClick={() => setUserProfile(user)} className="inline-flex items-center gap-1 rounded-lg bg-slate-700 px-3 py-2 font-bold text-sky-200">
+                          <Eye className="h-3.5 w-3.5" /> View
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!filteredUsers.length && <EmptyState text="No user profiles yet. Accounts appear here after signup or login." />}
+            </div>
+          </section>
+        )}
+
         {activeTab === 'bookings' && (
           <section className="overflow-x-auto rounded-2xl border border-slate-700 bg-slate-800">
             <div className="flex items-center justify-between gap-3 border-b border-slate-700 p-4"><div><h2 className="font-black text-white">Reservation management</h2><p className="mt-1 text-xs text-slate-400">Review guest, stay, payment and booking status.</p></div><span className="text-xs text-slate-400">{bookings.length} bookings</span></div>
@@ -594,7 +661,72 @@ export default function AdminDashboard({ onRefreshData }) {
             <Field label="Original price (₹)" type="number" min="1" value={hotelForm.original_price} onChange={(value) => setHotelForm({ ...hotelForm, original_price: value })} />
             <Field label="Star rating" type="number" min="1" max="5" required value={hotelForm.star_rating} onChange={(value) => setHotelForm({ ...hotelForm, star_rating: value })} />
             <Field label="Commission (%)" type="number" min="0" max="100" step="0.1" value={hotelForm.commission_percent} onChange={(value) => setHotelForm({ ...hotelForm, commission_percent: value })} />
-            <Field label="Main image URL" value={hotelForm.main_image} onChange={(value) => setHotelForm({ ...hotelForm, main_image: value })} />
+            <label className="block space-y-1.5 sm:col-span-2">
+              <span className="text-xs font-bold text-slate-400">Main photo (auto-compressed)</span>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                {hotelForm.main_image ? (
+                  <img src={hotelForm.main_image} alt="" className="h-20 w-28 rounded-xl object-cover ring-1 ring-slate-600" />
+                ) : null}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="text-xs text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-amber-400 file:px-3 file:py-2 file:text-xs file:font-black file:text-slate-950"
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (!file) return;
+                    try {
+                      const image = await compressImageFile(file);
+                      setHotelForm({ ...hotelForm, main_image: image });
+                    } catch (err) {
+                      setError(err.message);
+                    }
+                  }}
+                />
+              </div>
+            </label>
+            <label className="block space-y-1.5 sm:col-span-2">
+              <span className="text-xs font-bold text-slate-400">Gallery photos (auto-compressed, up to 5)</span>
+              <div className="flex flex-wrap gap-2">
+                {(hotelForm.gallery_images || []).map((img, idx) => (
+                  <button
+                    key={`${img.slice(-24)}-${idx}`}
+                    type="button"
+                    onClick={() => setHotelForm({
+                      ...hotelForm,
+                      gallery_images: hotelForm.gallery_images.filter((_, i) => i !== idx),
+                    })}
+                    className="relative h-16 w-20 overflow-hidden rounded-lg ring-1 ring-slate-600"
+                    title="Remove"
+                  >
+                    <img src={img} alt="" className="h-full w-full object-cover" />
+                  </button>
+                ))}
+                {(hotelForm.gallery_images || []).length < 5 && (
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="text-xs text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-2 file:text-xs file:font-bold file:text-white"
+                    onChange={async (event) => {
+                      const files = Array.from(event.target.files || []);
+                      event.target.value = '';
+                      const remaining = 5 - (hotelForm.gallery_images || []).length;
+                      if (!files.length) return;
+                      try {
+                        const images = await compressImageFiles(files.slice(0, remaining));
+                        setHotelForm({
+                          ...hotelForm,
+                          gallery_images: [...(hotelForm.gallery_images || []), ...images],
+                        });
+                      } catch (err) {
+                        setError(err.message);
+                      }
+                    }}
+                  />
+                )}
+              </div>
+            </label>
             <Field label="Amenities (comma separated)" value={(hotelForm.amenities || []).join(', ')} onChange={(value) => setHotelForm({ ...hotelForm, amenities: value.split(',').map((item) => item.trim()).filter(Boolean) })} />
             <label className="space-y-1.5 sm:col-span-2"><span className="text-xs font-bold text-slate-400">Description</span><textarea rows="3" value={hotelForm.description} onChange={(event) => setHotelForm({ ...hotelForm, description: event.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-400" /></label>
             <label className="flex items-center gap-2 text-sm text-slate-300 sm:col-span-2"><input type="checkbox" checked={Boolean(hotelForm.is_featured)} onChange={(event) => setHotelForm({ ...hotelForm, is_featured: event.target.checked })} /> Feature this property</label>
@@ -681,6 +813,51 @@ export default function AdminDashboard({ onRefreshData }) {
                 <Pencil className="h-4 w-4" /> Edit profile
               </button>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {userProfile && (
+        <Modal title="User profile" onClose={() => setUserProfile(null)} wide>
+          <div className="space-y-6">
+            <div className="flex flex-col gap-3 border-b border-slate-700 pb-5 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-amber-300">Registered account</p>
+                <h3 className="mt-1 text-xl font-black text-white">{userProfile.name}</h3>
+                <p className="mt-1 text-sm text-slate-400">{userProfile.email}</p>
+              </div>
+              <StatusPill positive={userProfile.role === 'CUSTOMER'}>{userProfile.role}</StatusPill>
+            </div>
+
+            <ProfileSection title="Contact">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <ProfileValue label="Full name" value={userProfile.name} />
+                <ProfileValue label="Email" value={userProfile.email} />
+                <ProfileValue label="Phone" value={userProfile.phone || 'Not provided'} />
+                <ProfileValue label="Email verified" value={userProfile.is_email_verified ? 'Verified' : 'Not verified'} />
+              </div>
+            </ProfileSection>
+
+            <ProfileSection title="Account">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <ProfileValue label="Role" value={userProfile.role} />
+                <ProfileValue label="Bookings on platform" value={userProfile.booking_count ?? 0} />
+                <ProfileValue label="Joined on" value={dateText(userProfile.created_at)} />
+                {userProfile.role === 'VENDOR' && (
+                  <ProfileValue label="Vendor status" value={userProfile.vendor_status || 'PENDING'} />
+                )}
+              </div>
+            </ProfileSection>
+
+            {userProfile.role === 'VENDOR' && (
+              <ProfileSection title="Partner details">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ProfileValue label="Hotel name" value={userProfile.hotel_name || 'Not assigned'} />
+                  <ProfileValue label="City" value={userProfile.hotel_city || '—'} />
+                  <ProfileValue label="Address" className="sm:col-span-2" value={userProfile.hotel_address || '—'} />
+                </div>
+              </ProfileSection>
+            )}
           </div>
         </Modal>
       )}

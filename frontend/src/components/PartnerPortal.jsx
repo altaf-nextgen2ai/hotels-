@@ -8,6 +8,7 @@ import {
   Utensils, ShieldCheck, Moon, Save, Building2, Eye, ChevronDown, Trash2
 } from 'lucide-react';
 import { apiService } from '../services/api';
+import { compressImageFile, compressImageFiles } from '../utils/compressImage';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-IN');
 
@@ -140,36 +141,31 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
     amenities: ['WiFi', 'Pool', 'Breakfast', 'AC'], is_featured: true,
   });
   const [registering, setRegistering] = useState(false);
-
-  // ── Image file helpers ────────────────────────────────────────────────────
-  const readFileAsBase64 = (file) =>
-    new Promise((resolve, reject) => {
-      if (file.size > 3 * 1024 * 1024) { reject(new Error(`${file.name} is too large (max 3MB)`)); return; }
-      const reader = new FileReader();
-      reader.onload  = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error('Failed to read file'));
-      reader.readAsDataURL(file);
-    });
+  const [compressing, setCompressing] = useState(false);
 
   const handleMainImageUpload = async (e) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+    setCompressing(true);
     try {
-      const b64 = await readFileAsBase64(file);
+      const b64 = await compressImageFile(file);
       setNewHotel(p => ({ ...p, main_image: b64 }));
     } catch (err) { showToast(err.message, 'error'); }
+    finally { setCompressing(false); }
   };
 
   const handleGalleryUpload = async (e) => {
     const files = Array.from(e.target.files || []);
+    e.target.value = '';
     const remaining = 5 - (newHotel.gallery_images?.length || 0);
     if (remaining <= 0) { showToast('Max 5 gallery images allowed', 'error'); return; }
-    for (const file of files.slice(0, remaining)) {
-      try {
-        const b64 = await readFileAsBase64(file);
-        setNewHotel(p => ({ ...p, gallery_images: [...(p.gallery_images || []), b64] }));
-      } catch (err) { showToast(err.message, 'error'); }
-    }
+    setCompressing(true);
+    try {
+      const compressed = await compressImageFiles(files.slice(0, remaining));
+      setNewHotel(p => ({ ...p, gallery_images: [...(p.gallery_images || []), ...compressed] }));
+    } catch (err) { showToast(err.message, 'error'); }
+    finally { setCompressing(false); }
   };
 
   const removeGalleryImage = (idx) => {
@@ -257,9 +253,13 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
     e.preventDefault();
     if (!newHotel.main_image) { showToast('Please upload a main image', 'error'); return; }
     setRegistering(true);
+    const price = Number(newHotel.price_per_night) || 0;
     const res = await apiService.createHotel({
       ...newHotel,
       destination: newHotel.city,
+      price_per_night: price,
+      original_price: Number(newHotel.original_price) || price,
+      star_rating: Number(newHotel.star_rating) || 4,
       rating_score: 4.8,
       review_count: 0,
       gallery_images: newHotel.gallery_images || [],
@@ -1048,8 +1048,10 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
                         <div className="w-8 h-8 mx-auto mb-2 rounded-full bg-blue-100 flex items-center justify-center">
                           <PlusCircle className="w-4 h-4 text-blue-600" />
                         </div>
-                        <p className="text-xs font-semibold text-gray-500">Click to upload main photo</p>
-                        <p className="text-[10px] text-gray-400 mt-0.5">JPG, PNG · Max 3MB</p>
+                        <p className="text-xs font-semibold text-gray-500">
+                          {compressing ? 'Compressing photo…' : 'Click to upload main photo'}
+                        </p>
+                        <p className="text-[10px] text-gray-400 mt-0.5">JPG, PNG, WEBP · auto-compressed</p>
                       </div>
                     )}
                     <input type="file" accept="image/*" className="hidden" onChange={handleMainImageUpload} />
@@ -1089,7 +1091,7 @@ export default function PartnerPortal({ hotels = [], currentUser, onLogout, onRe
                     )}
                   </div>
                   <p className="text-[10px] text-gray-400 mt-1.5">
-                    {(newHotel.gallery_images || []).length}/5 photos added · These show in the hotel details slideshow
+                    {(newHotel.gallery_images || []).length}/5 photos added · Auto-compressed for upload
                   </p>
                 </div>
                 <div>

@@ -229,6 +229,10 @@ export const apiService = {
     return adminRequest('/admin/vendors/');
   },
 
+  async getAdminUsers() {
+    return adminRequest('/admin/users/');
+  },
+
   async getAdminHotels() {
     return adminRequest('/admin/hotels/');
   },
@@ -388,7 +392,12 @@ export const apiService = {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        return { error: data.error || data.details || `Registration failed (${response.status})` };
+        const details = data.details && typeof data.details === 'object'
+          ? Object.entries(data.details)
+              .map(([field, messages]) => `${field}: ${Array.isArray(messages) ? messages[0] : messages}`)
+              .join('; ')
+          : '';
+        return { error: data.error || details || `Registration failed (${response.status})` };
       }
       return data;
     } catch (error) {
