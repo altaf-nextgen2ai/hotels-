@@ -103,22 +103,23 @@ export const apiService = {
   // Fetch hotels with filters
   async getHotels(params = {}) {
     try {
-      const url = new URL(`${API_BASE_URL}/hotels/`);
-      Object.keys(params).forEach(key => {
+      const searchParams = new URLSearchParams();
+      Object.keys(params).forEach((key) => {
         if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
           if (Array.isArray(params[key])) {
-            params[key].forEach(val => url.searchParams.append(key, val));
+            params[key].forEach((val) => searchParams.append(key, val));
           } else {
-            url.searchParams.append(key, params[key]);
+            searchParams.append(key, params[key]);
           }
         }
       });
-
-      const response = await fetch(url, {
+      const query = searchParams.toString();
+      const response = await fetch(`${API_BASE_URL}/hotels/${query ? `?${query}` : ''}`, {
         headers: { Accept: 'application/json' },
       });
       if (!response.ok) throw new Error('Failed to fetch hotels');
-      return await response.json();
+      const data = await response.json();
+      return Array.isArray(data) ? data : (data?.results || []);
     } catch (error) {
       console.warn('API Error (getHotels), falling back:', error);
       return null;
