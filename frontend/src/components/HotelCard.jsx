@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Star, MapPin, Sparkles, ArrowRight, ShieldCheck, Flame, Gift } from 'lucide-react';
+import { Star, MapPin, ArrowRight, ShieldCheck, Flame } from 'lucide-react';
 
 export default function HotelCard({ hotel, onSelectHotel, layout = 'list' }) {
   const isGrid = layout === 'grid';
@@ -25,9 +25,6 @@ export default function HotelCard({ hotel, onSelectHotel, layout = 'list' }) {
   }, [photos.length]);
 
   const activePhoto = photos[photoIndex] || hotel.main_image;
-  const discountPercent = hotel.original_price
-    ? Math.round(((hotel.original_price - hotel.price_per_night) / hotel.original_price) * 100)
-    : 0;
 
   // Helper for Agoda-style rating category text
   const getRatingLabel = (score) => {
@@ -67,29 +64,6 @@ export default function HotelCard({ hotel, onSelectHotel, layout = 'list' }) {
             ))}
           </div>
         )}
-
-        {/* Agoda Style Badges Overlay */}
-        <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-10">
-          {/* Bundle & Save Badge */}
-          <span className="bg-gradient-to-r from-red-600 to-amber-500 text-white text-[10px] font-black px-2.5 py-1 rounded-md uppercase tracking-wider flex items-center gap-1 shadow-md">
-            <Gift className="w-3 h-3 text-yellow-200" />
-            BUNDLE & SAVE UP TO 25%
-          </span>
-
-          {/* Member Special Deal */}
-          {hotel.is_featured && (
-            <span className="bg-slate-900/90 text-amber-300 border border-amber-500/40 text-[10px] font-black px-2.5 py-1 rounded-md uppercase tracking-wider flex items-center gap-1 backdrop-blur-md shadow-md">
-              <Sparkles className="w-3 h-3 text-amber-400" />
-              AGODA VIP MEMBER DEAL
-            </span>
-          )}
-
-          {discountPercent > 0 && (
-            <span className="bg-emerald-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded-md shadow-sm w-fit">
-              {discountPercent}% CHEAPER TODAY
-            </span>
-          )}
-        </div>
 
         {/* Star Rating Overlay */}
         <div className="absolute bottom-3 left-3 bg-slate-950/80 backdrop-blur-md text-white text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 border border-white/10">
