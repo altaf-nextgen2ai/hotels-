@@ -19,7 +19,9 @@ jobs:
   deploy:
     name: SSH deploy (Docker Compose)
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/fix/mobile-responsive'
+    if: >-
+      (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/fix/mobile-responsive')
+      && secrets.EC2_HOST != '' && secrets.EC2_USER != '' && secrets.EC2_SSH_KEY != ''
     steps:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
