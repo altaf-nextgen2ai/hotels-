@@ -10,6 +10,7 @@ import HotelDetailsModal from './components/HotelDetailsModal';
 import BookingCheckoutModal from './components/BookingCheckoutModal';
 import PaymentModal from './components/PaymentModal';
 import UserAccountModal from './components/UserAccountModal';
+import SupportModal from './components/SupportModal';
 import AuthModal from './components/AuthModal';
 import AdminDashboard from './components/AdminDashboard';
 import PartnerPortal from './components/PartnerPortal';
@@ -223,6 +224,7 @@ export default function App() {
   const [paymentRoom,  setPaymentRoom]  = useState(null);
 
   const [showBookingsModal, setShowBookingsModal] = useState(false);
+  const [showSupportModal, setShowSupportModal] = useState(false);
   const [userBookings, setUserBookings] = useState([]);
 
   // Mobile filter panel
@@ -495,7 +497,7 @@ export default function App() {
           const el = document.getElementById('offers-section');
           if (el) el.scrollIntoView({ behavior: 'smooth' });
         }}
-        onOpenSupport={() => alert(`TRUMITRIP 24/7 Support Desk:\nPhone: +91 8447151225\nEmail: support@trumitrip.com\nAddress: Deevika Tower, Chandan Nagar, Ghaziabad`)}
+        onOpenSupport={() => setShowSupportModal(true)}
       />
       )}
 
@@ -741,6 +743,13 @@ export default function App() {
           onClose={() => setShowBookingsModal(false)}
           onCancelBooking={handleCancelBooking}
           onRequireLogin={handleReauthPrompt}
+        />
+      )}
+
+      {showSupportModal && (
+        <SupportModal
+          onClose={() => setShowSupportModal(false)}
+          onNavigatePath={handleNavigatePath}
         />
       )}
 

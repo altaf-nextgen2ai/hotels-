@@ -1,0 +1,44 @@
+name: Deploy to EC2
+
+# Required GitHub repo secrets:
+#   EC2_HOST          — e.g. 35.154.39.239
+#   EC2_USER          — e.g. ec2-user
+#   EC2_SSH_KEY       — full private key (.pem) contents
+#   EC2_APP_DIR       — optional, default /home/ec2-user/hotels-
+
+on:
+  push:
+    branches: [main, fix/mobile-responsive]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-ec2
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: SSH deploy (Docker Compose)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/fix/mobile-responsive'
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 30m
+          script: |
+            set -e
+            APP_DIR="${{ secrets.EC2_APP_DIR }}"
+            if [ -z "$APP_DIR" ]; then APP_DIR="/home/ec2-user/hotels-"; fi
+            BRANCH="${{ github.ref_name }}"
+
+            cd "$APP_DIR"
+            git fetch origin
+            git checkout "$BRANCH"
+            git pull origin "$BRANCH"
+
+            sudo docker compose pull 2>/dev/null || true
+            sudo docker compose up -d --build
+            sudo docker compose ps
