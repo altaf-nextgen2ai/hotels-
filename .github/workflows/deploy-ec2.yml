@@ -4,7 +4,7 @@ name: Deploy to EC2
 #   EC2_HOST          — e.g. 35.154.39.239
 #   EC2_USER          — e.g. ec2-user
 #   EC2_SSH_KEY       — full private key (.pem) contents
-#   EC2_APP_DIR       — optional, default /home/ec2-user/hotels-
+#   EC2_APP_DIR       — optional, default /home/ec2-user/hotel/hotels-
 
 on:
   push:
@@ -31,7 +31,7 @@ jobs:
           script: |
             set -e
             APP_DIR="${{ secrets.EC2_APP_DIR }}"
-            if [ -z "$APP_DIR" ]; then APP_DIR="/home/ec2-user/hotels-"; fi
+            if [ -z "$APP_DIR" ]; then APP_DIR="/home/ec2-user/hotel/hotels-"; fi
             BRANCH="${{ github.ref_name }}"
 
             cd "$APP_DIR"
